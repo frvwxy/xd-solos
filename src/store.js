@@ -15,9 +15,11 @@ export function loadState() {
       state.history = state.warnings.map(warning => ({ ...warning, action: 'warn' }));
     }
     if (!Array.isArray(state.history)) throw new Error('Invalid moderation history');
+    if (state.notes === undefined) state.notes = [];
+    if (!Array.isArray(state.notes)) throw new Error('Invalid moderator notes');
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    state = { warnings: [], timedBans: [], history: [] };
+    state = { warnings: [], timedBans: [], history: [], notes: [] };
   }
   return state;
 }
@@ -41,6 +43,17 @@ export function addHistory(entry) {
 
 export function getHistory(guildId, targetId, limit = 10) {
   return getState().history
+    .filter(entry => entry.guildId === guildId && entry.targetId === targetId)
+    .slice(-limit).reverse();
+}
+
+export function addNote(entry) {
+  getState().notes.push({ ...entry, at: new Date().toISOString() });
+  saveState();
+}
+
+export function getNotes(guildId, targetId, limit = 10) {
+  return getState().notes
     .filter(entry => entry.guildId === guildId && entry.targetId === targetId)
     .slice(-limit).reverse();
 }

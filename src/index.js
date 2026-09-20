@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
-  ActionRowBuilder, Client, Events, GatewayIntentBits, InteractionContextType, MessageFlags,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, EmbedBuilder, Events, GatewayIntentBits, InteractionContextType, MessageFlags,
   ModalBuilder, PermissionFlagsBits, REST, Routes, SlashCommandBuilder,
-  StringSelectMenuBuilder, TextInputBuilder, TextInputStyle,
+  TextInputBuilder, TextInputStyle, escapeMarkdown,
 } from 'discord.js';
 import { MAX_BAN, MAX_TIMEOUT, parseDuration } from './duration.js';
-import { accessLevel, allowedActions, canPerform } from './policy.js';
-import { addHistory, getHistory, getState, loadState, saveState } from './store.js';
+import { accessLevel, canPerform, visibleActions } from './policy.js';
+import { addHistory, addNote, getHistory, getNotes, getState, loadState, saveState } from './store.js';
 
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
 if (!DISCORD_TOKEN || !CLIENT_ID || !GUILD_ID) {
@@ -16,9 +16,16 @@ loadState();
 
 const actions = {
   ban: { verb: 'banned' },
+  tempban: { verb: 'temporarily banned' },
   mute: { verb: 'timed out' },
   kick: { verb: 'kicked' },
   warn: { verb: 'warned' },
+  unban: { verb: 'unbanned' },
+};
+const buttonLabels = { ban: 'Ban', tempban: 'Temp Ban', mute: 'Mute', kick: 'Kick', warn: 'Warn', unban: 'Unban', history: 'History' };
+const buttonStyles = {
+  ban: ButtonStyle.Danger, tempban: ButtonStyle.Danger, mute: ButtonStyle.Secondary,
+  kick: ButtonStyle.Secondary, warn: ButtonStyle.Secondary, unban: ButtonStyle.Success, history: ButtonStyle.Primary,
 };
 const pending = new Map();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -44,10 +51,116 @@ function canActOn(actor, target, guild) {
 async function resolveMembers(interaction, targetId) {
   const [actor, target, bot] = await Promise.all([
     interaction.guild.members.fetch(interaction.user.id),
-    interaction.guild.members.fetch(targetId).catch(() => null),
+    interaction.guild.members.fetch({ user: targetId, force: true }).catch(() => null),
     interaction.guild.members.fetchMe(),
   ]);
   return { actor, target, bot };
+}
+
+async function fetchBan(guild, targetId) {
+  return guild.bans.fetch({ user: targetId, force: true }).catch(error => {
+    if (error.code === 10026) return null;
+    throw error;
+  });
+}
+
+function profileCard(guildId, targetId, target, ban, user) {
+  const status = target ? 'In server' : ban ? 'Banned' : 'Not in server';
+  const avatar = user?.displayAvatarURL({ size: 256 });
+  const created = user?.createdTimestamp ? Math.floor(user.createdTimestamp / 1000) : null;
+  const joined = target?.joinedTimestamp ? Math.floor(target.joinedTimestamp / 1000) : null;
+  const timeout = target?.communicationDisabledUntilTimestamp;
+  const warningCount = getState().history.filter(entry => entry.guildId === guildId && entry.targetId === targetId && entry.action === 'warn').length;
+  const card = new EmbedBuilder()
+    .setColor(ban ? 0xef4444 : target ? 0x5865f2 : 0x747f8d)
+    .setAuthor({ name: target?.displayName ?? user?.username ?? 'Unknown user', ...(avatar ? { iconURL: avatar } : {}) })
+    .setDescription(`${user ? `@${escapeMarkdown(user.username)}` : 'Unknown account'}  •  ID: \`${targetId}\``)
+    .addFields(
+      { name: 'Server status', value: timeout && timeout > Date.now() ? `Timed out until <t:${Math.floor(timeout / 1000)}:f>` : status, inline: true },
+      { name: 'Top role', value: target && target.roles.highest.id !== target.guild.id ? escapeMarkdown(target.roles.highest.name) : 'None', inline: true },
+      { name: 'Warnings', value: String(warningCount), inline: true },
+      { name: 'Account created', value: created ? `<t:${created}:D> (<t:${created}:R>)` : 'Unknown', inline: false },
+      { name: 'Joined server', value: joined ? `<t:${joined}:D> (<t:${joined}:R>)` : 'Not currently a member', inline: false },
+    )
+    .setFooter({ text: 'Moderation actions • Only you can see this card' });
+  if (avatar) card.setThumbnail(avatar);
+  return card;
+}
+
+function actionButtons(nonce, available) {
+  const buttons = available.map(action => new ButtonBuilder()
+    .setCustomId(`mod:choose:${nonce}:${action}`)
+    .setLabel(buttonLabels[action])
+    .setStyle(buttonStyles[action]));
+  const rows = [];
+  for (let index = 0; index < buttons.length; index += 5) {
+    rows.push(new ActionRowBuilder().addComponents(buttons.slice(index, index + 5)));
+  }
+  return rows;
+}
+
+function panelButtons(nonce, buttons) {
+  return [new ActionRowBuilder().addComponents(buttons.map(([view, label]) =>
+    new ButtonBuilder().setCustomId(`mod:view:${nonce}:${view}`).setLabel(label)
+      .setStyle(view.startsWith('back') ? ButtonStyle.Secondary : ButtonStyle.Primary)))];
+}
+
+function panel(title, subtitle, description) {
+  return new EmbedBuilder().setColor(0x5865f2).setTitle(title)
+    .setDescription(`${subtitle}\n\n${description}`);
+}
+
+function panelPayload(nonce, item, view, notice = '') {
+  const subtitle = `Discord user \`${item.targetId}\``;
+  if (view === 'profile') {
+    return { content: '', embeds: [item.profile], components: actionButtons(nonce, item.available) };
+  }
+  if (view === 'records') {
+    return {
+      content: '', embeds: [panel('User records', subtitle, 'What would you like to open?')],
+      components: panelButtons(nonce, [['notes', '📝 Notes'], ['history', '📁 Moderation History'], ['backprofile', 'Back']]),
+    };
+  }
+  if (view === 'history') {
+    const entries = getHistory(item.guildId, item.targetId);
+    const total = getState().history.filter(entry => entry.guildId === item.guildId && entry.targetId === item.targetId).length;
+    const lines = entries.map(entry => {
+      const when = Math.floor(new Date(entry.at).getTime() / 1000);
+      const duration = entry.duration ? ` (${entry.duration})` : '';
+      const reason = (entry.reason ?? 'No reason provided').replace(/\s+/g, ' ').slice(0, 80);
+      return `• <t:${when}:f> — ${buttonLabels[entry.action] ?? entry.action}${duration} — ${reason} — by ${entry.moderatorId ?? 'bot'}`;
+    });
+    return {
+      content: '', embeds: [panel('Moderation History', `${subtitle} • ${total} record(s)`, lines.join('\n') || 'No moderation history was found for this user.')],
+      components: panelButtons(nonce, [['backrecords', 'Back']]),
+    };
+  }
+  if (view === 'notes') {
+    return {
+      content: '', embeds: [panel('Notes', subtitle, `${notice ? `${notice}\n\n` : ''}Add a private moderator note or review existing notes.`)],
+      components: panelButtons(nonce, [['addnote', 'Add Note'], ['viewnotes', 'View Notes'], ['backrecords', 'Back']]),
+    };
+  }
+  const notes = getNotes(item.guildId, item.targetId);
+  const total = getState().notes.filter(note => note.guildId === item.guildId && note.targetId === item.targetId).length;
+  const lines = notes.map(note => {
+    const when = Math.floor(new Date(note.at).getTime() / 1000);
+    return `• <t:${when}:f> — ${note.text.replace(/\s+/g, ' ').slice(0, 250)} — by ${note.authorId}`;
+  });
+  return {
+    content: '', embeds: [panel('Private Notes', `${subtitle} • ${total} note(s)`, lines.join('\n') || 'No notes were found for this user.')],
+    components: panelButtons(nonce, [['backnotes', 'Back']]),
+  };
+}
+
+function saveHistorySafely(entry) {
+  try {
+    addHistory(entry);
+    return true;
+  } catch (error) {
+    console.error('Action succeeded but history could not be saved:', error);
+    return false;
+  }
 }
 
 async function notify(target, guildName, action, reason, duration) {
@@ -61,18 +174,27 @@ async function notify(target, guildName, action, reason, duration) {
   }
 }
 
-function modalFor(action, nonce, timedOnly) {
-  const modal = new ModalBuilder().setCustomId(`mod:submit:${nonce}`).setTitle(`${action[0].toUpperCase()}${action.slice(1)} member`);
+function modalFor(action, nonce) {
+  if (action === 'addnote') {
+    return new ModalBuilder().setCustomId(`mod:note:${nonce}`).setTitle('Add moderator note')
+      .addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('note').setLabel('Private note')
+          .setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(250)
+          .setPlaceholder('Write a note visible only to moderators'),
+      ));
+  }
+  const modal = new ModalBuilder().setCustomId(`mod:submit:${nonce}:${action}`).setTitle(`${buttonLabels[action]} user`);
   modal.addComponents(new ActionRowBuilder().addComponents(
-    new TextInputBuilder().setCustomId('reason').setLabel('Reason (optional)').setStyle(TextInputStyle.Paragraph)
-      .setRequired(false).setMaxLength(300).setPlaceholder('No reason provided'),
+    new TextInputBuilder().setCustomId('reason').setLabel(action === 'ban' ? 'Reason (required)' : 'Reason (optional)')
+      .setStyle(TextInputStyle.Paragraph).setRequired(action === 'ban')
+      .setMaxLength(300).setPlaceholder(action === 'ban' ? 'Why is this user being permanently banned?' : 'No reason provided'),
   ));
-  if (action === 'ban' || action === 'mute') {
+  if (action === 'tempban' || action === 'mute') {
     modal.addComponents(new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('duration')
-        .setLabel(action === 'ban' && !timedOnly ? 'Duration (blank = permanent)' : 'Duration (required)')
+        .setLabel('Duration (required)')
         .setPlaceholder('Examples: 30m, 2h, 7d, 1w')
-        .setStyle(TextInputStyle.Short).setRequired(action === 'mute' || timedOnly).setMaxLength(8),
+        .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8),
     ));
   }
   return modal;
@@ -87,23 +209,31 @@ async function handleCommand(interaction) {
   if (typedId && !/^\d{17,20}$/.test(typedId)) return reply(interaction, 'user_id must be a Discord user ID.');
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const targetId = selectedUser?.id ?? typedId;
-  const { actor, target } = await resolveMembers(interaction, targetId);
+  const { actor, target, bot } = await resolveMembers(interaction, targetId);
   const level = accessLevel(actor.roles.cache.keys());
   if (level === 'none') return reply(interaction, 'Your roles do not allow use of this moderation command.');
+  let ban = null;
+  if (!target && bot.permissions.has(PermissionFlagsBits.BanMembers)) {
+    try {
+      ban = await fetchBan(interaction.guild, targetId);
+    } catch (error) {
+      console.warn(`Could not check ban status for ${targetId}:`, error);
+    }
+  }
+  const user = target?.user ?? ban?.user ?? await client.users.fetch(targetId).catch(() => null);
   const canModerate = target && canActOn(actor, target, interaction.guild);
-  const options = allowedActions(level).filter(action => action === 'history' || canModerate);
+  const options = visibleActions(level, { canModerate: Boolean(canModerate), banned: Boolean(ban) });
 
   const nonce = randomUUID();
-  pending.set(nonce, { actorId: actor.id, targetId, guildId: interaction.guildId, expiresAt: Date.now() + 14 * 60_000 });
-  const menu = new StringSelectMenuBuilder().setCustomId(`mod:choose:${nonce}`)
-    .setPlaceholder('Choose a moderation action')
-    .addOptions(options.map(action => ({
-      label: action === 'ban' && level === 'timed' ? 'Temp Ban' : action[0].toUpperCase() + action.slice(1),
-      value: action,
-    })));
+  pending.set(nonce, {
+    actorId: actor.id, targetId, guildId: interaction.guildId,
+    available: options, profile: profileCard(interaction.guildId, targetId, target, ban, user),
+    expiresAt: Date.now() + 14 * 60_000,
+  });
   await interaction.editReply({
-    content: `Choose an action for ${target?.user.username ?? `user ${targetId}`} (${targetId}).${canModerate ? '' : ' Only history is available because this user is not a current member or is above your role.'} Only you can use this menu.`,
-    components: [new ActionRowBuilder().addComponents(menu)],
+    content: '',
+    embeds: [pending.get(nonce).profile],
+    components: actionButtons(nonce, options),
     allowedMentions: { parse: [] },
   });
 }
@@ -114,61 +244,111 @@ function getPending(interaction, nonce) {
   return item;
 }
 
-async function handleChoice(interaction) {
-  const nonce = interaction.customId.slice('mod:choose:'.length);
-  const item = getPending(interaction, nonce);
-  if (!item) return reply(interaction, 'This menu expired or belongs to another moderator. Run /user again.');
-  if (item.action) return reply(interaction, 'A form is already open for this menu. Run /user to start over.');
-  const action = interaction.values[0];
+async function showView(interaction, nonce, item, view) {
+  await interaction.deferUpdate();
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  const level = accessLevel(actor.roles.cache.keys());
-  if (!allowedActions(level).includes(action)) return reply(interaction, 'Your roles do not allow that action.');
-  if (action === 'history') {
-    pending.delete(nonce);
-    const entries = getHistory(interaction.guildId, item.targetId);
-    const lines = entries.map(entry => {
-      const when = Math.floor(new Date(entry.at).getTime() / 1000);
-      const duration = entry.duration ? ` (${entry.duration})` : '';
-      const reason = (entry.reason ?? 'No reason provided').replace(/\s+/g, ' ').slice(0, 80);
-      return `• <t:${when}:f> — ${entry.action}${duration} — ${reason} — by ${entry.moderatorId ?? 'bot'}`;
-    });
-    return reply(interaction, entries.length ? `Recent history for ${item.targetId}:\n${lines.join('\n')}` : `No recorded history for ${item.targetId}.`);
+  if (!canPerform(accessLevel(actor.roles.cache.keys()), 'history')) {
+    return interaction.editReply({ content: 'Your roles no longer allow access to these records.', embeds: [], components: [] });
   }
+  return interaction.editReply({ ...panelPayload(nonce, item, view), allowedMentions: { parse: [] } });
+}
+
+async function handleNavigation(interaction) {
+  const [nonce, requested] = interaction.customId.slice('mod:view:'.length).split(':');
+  const item = getPending(interaction, nonce);
+  if (!item) return reply(interaction, 'This card expired. Run /user again.');
+  if (item.used) return reply(interaction, 'This card was already used. Run /user again.');
+  if (requested === 'addnote') return interaction.showModal(modalFor('addnote', nonce));
+  const views = {
+    notes: 'notes', history: 'history', viewnotes: 'viewnotes',
+    backprofile: 'profile', backrecords: 'records', backnotes: 'notes',
+  };
+  const view = views[requested];
+  if (!view) return reply(interaction, 'Unknown view.');
+  return showView(interaction, nonce, item, view);
+}
+
+async function handleChoice(interaction) {
+  const [nonce, action] = interaction.customId.slice('mod:choose:'.length).split(':');
+  const item = getPending(interaction, nonce);
+  if (!item) return reply(interaction, 'This card expired or belongs to another moderator. Run /user again.');
+  if (item.used) return reply(interaction, 'This card was already used. Run /user again.');
+  if (!item.available.includes(action)) return reply(interaction, 'That action is not available on this card.');
+  if (action === 'history') return showView(interaction, nonce, item, 'records');
   if (!actions[action]) return reply(interaction, 'Unknown action.');
-  const target = await interaction.guild.members.fetch(item.targetId).catch(() => null);
-  if (!target || !canActOn(actor, target, interaction.guild)) return reply(interaction, 'This member is no longer available to moderate.');
-  item.action = action;
-  await interaction.showModal(modalFor(action, nonce, level === 'timed'));
+  await interaction.showModal(modalFor(action, nonce));
+}
+
+async function handleNoteSubmit(interaction) {
+  const nonce = interaction.customId.slice('mod:note:'.length);
+  const item = getPending(interaction, nonce);
+  if (!item) return reply(interaction, 'This card expired. Run /user again.');
+  if (item.used) return reply(interaction, 'This card was already used. Run /user again.');
+  const note = interaction.fields.getTextInputValue('note').trim();
+  if (!note) return reply(interaction, 'The note cannot be empty.');
+  if (interaction.isFromMessage()) await interaction.deferUpdate();
+  else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const actor = await interaction.guild.members.fetch(interaction.user.id);
+  if (!canPerform(accessLevel(actor.roles.cache.keys()), 'history')) {
+    return reply(interaction, 'Your roles no longer allow access to moderator notes.');
+  }
+  try {
+    addNote({ guildId: interaction.guildId, targetId: item.targetId, authorId: actor.id, text: note });
+  } catch (error) {
+    console.error('Could not save moderator note:', error);
+    return reply(interaction, 'The note could not be saved. Check the bot console.');
+  }
+  return interaction.editReply({ ...panelPayload(nonce, item, 'notes', 'Note saved.'), allowedMentions: { parse: [] } });
 }
 
 async function handleSubmit(interaction) {
-  const nonce = interaction.customId.slice('mod:submit:'.length);
+  const [nonce, action] = interaction.customId.slice('mod:submit:'.length).split(':');
   const item = getPending(interaction, nonce);
-  if (!item || !item.action) return reply(interaction, 'This form expired. Run /user again.');
-  pending.delete(nonce);
-  const { action, targetId } = item;
-  const reason = (interaction.fields.fields.has('reason') ? interaction.fields.getTextInputValue('reason').trim() : '') || 'No reason provided';
-  const duration = (action === 'ban' || action === 'mute') && interaction.fields.fields.has('duration')
+  if (!item || item.used || !item.available.includes(action) || !actions[action]) {
+    return reply(interaction, 'This form expired or was already used. Run /user again.');
+  }
+  const { targetId } = item;
+  const enteredReason = interaction.fields.fields.has('reason') ? interaction.fields.getTextInputValue('reason').trim() : '';
+  if (action === 'ban' && !enteredReason) return reply(interaction, 'A reason is required for a permanent ban.');
+  const reason = enteredReason || 'No reason provided';
+  const duration = (action === 'tempban' || action === 'mute') && interaction.fields.fields.has('duration')
     ? interaction.fields.getTextInputValue('duration').trim() : '';
-  const durationMs = duration ? parseDuration(duration, action === 'ban' ? MAX_BAN : MAX_TIMEOUT) : null;
+  const durationMs = duration ? parseDuration(duration, action === 'tempban' ? MAX_BAN : MAX_TIMEOUT) : null;
   if (action === 'mute' && !durationMs) return reply(interaction, 'Mute duration is required: 1m to 28d (e.g. 30m, 2h, 7d).');
-  if (action === 'ban' && duration && !durationMs) return reply(interaction, 'Ban duration must be 1m to 365d, or blank for permanent.');
+  if (action === 'tempban' && !durationMs) return reply(interaction, 'Temp ban duration is required: 1m to 365d (e.g. 2h, 7d).');
 
+  item.used = true;
+  pending.delete(nonce);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const { actor, target, bot } = await resolveMembers(interaction, targetId);
   const level = accessLevel(actor.roles.cache.keys());
-  if (!canPerform(level, action, durationMs)) return reply(interaction, action === 'ban' && level === 'timed' && !durationMs
-    ? 'Your role can only use timed bans. Enter a duration between 1m and 365d.'
-    : 'Your roles no longer allow that action.');
+  if (!canPerform(level, action)) return reply(interaction, 'Your roles no longer allow that action.');
+  const auditReason = `${reason} | moderator ${actor.id}`;
+
+  if (action === 'unban') {
+    if (!bot.permissions.has(PermissionFlagsBits.BanMembers)) return reply(interaction, 'I need Ban Members permission to unban.');
+    try {
+      const ban = await fetchBan(interaction.guild, targetId);
+      if (!ban) return reply(interaction, 'This user is no longer banned.');
+      await interaction.guild.bans.remove(targetId, auditReason);
+      getState().timedBans = getState().timedBans.filter(entry => entry.guildId !== interaction.guildId || entry.targetId !== targetId);
+      const dmSent = await notify(ban.user, interaction.guild.name, action, reason);
+      const historySaved = saveHistorySafely({ guildId: interaction.guildId, targetId, moderatorId: actor.id, action, reason, duration: null, dmSent });
+      return reply(interaction, `${ban.user.username} was unbanned. DM ${dmSent ? 'sent' : 'could not be delivered'}.${historySaved ? '' : ' Warning: history could not be saved.'}`);
+    } catch (error) {
+      console.error('Unban failed:', error);
+      return reply(interaction, 'Could not unban this user. Check my permissions and the console.');
+    }
+  }
+
   if (!target) return reply(interaction, 'The target is no longer in this server. No action was taken.');
   if (!canActOn(actor, target, interaction.guild)) return reply(interaction, 'Role hierarchy prevents this action.');
-  if ((action === 'ban' && (!bot.permissions.has(PermissionFlagsBits.BanMembers) || !target.bannable)) ||
+  if (((action === 'ban' || action === 'tempban') && (!bot.permissions.has(PermissionFlagsBits.BanMembers) || !target.bannable)) ||
       (action === 'kick' && (!bot.permissions.has(PermissionFlagsBits.KickMembers) || !target.kickable)) ||
       (action === 'mute' && (!bot.permissions.has(PermissionFlagsBits.ModerateMembers) || !target.moderatable))) {
     return reply(interaction, 'I lack the required permission or a higher role than the target.');
   }
 
-  const auditReason = `${reason} | moderator ${actor.id}`;
   let dmSent;
   try {
     if (action === 'warn') {
@@ -184,7 +364,7 @@ async function handleSubmit(interaction) {
       if (action === 'kick') await target.kick(auditReason);
       else {
         let entry;
-        if (durationMs) {
+        if (action === 'tempban') {
           entry = { guildId: interaction.guildId, targetId, expiresAt: Date.now() + durationMs, tag: randomUUID() };
           getState().timedBans.push(entry);
           saveState();
@@ -200,14 +380,8 @@ async function handleSubmit(interaction) {
         }
       }
     }
-    let historySaved = true;
-    try {
-      addHistory({ guildId: interaction.guildId, targetId, moderatorId: actor.id, action, reason, duration: duration || null, dmSent });
-    } catch (error) {
-      historySaved = false;
-      console.error('Action succeeded but history could not be saved:', error);
-    }
-    const label = action === 'ban' && !duration ? 'permanently banned' : actions[action].verb;
+    const historySaved = saveHistorySafely({ guildId: interaction.guildId, targetId, moderatorId: actor.id, action, reason, duration: duration || null, dmSent });
+    const label = action === 'ban' ? 'permanently banned' : actions[action].verb;
     return reply(interaction, `${target.user.username} was ${label}${duration ? ` for ${duration}` : ''}. DM ${dmSent ? 'sent' : 'could not be delivered'}.${historySaved ? '' : ' Warning: history could not be saved.'}`);
   } catch (error) {
     console.error(`${action} failed:`, error);
@@ -224,10 +398,7 @@ async function checkTimedBans() {
       if (entry.expiresAt > Date.now()) continue;
       try {
         const guild = await client.guilds.fetch(entry.guildId);
-        const ban = await guild.bans.fetch(entry.targetId).catch(error => {
-          if (error.code === 10026) return null; // Already unbanned manually.
-          throw error;
-        });
+        const ban = await fetchBan(guild, entry.targetId);
         // A manual unban followed by a new ban must never be undone by the old timer.
         if (ban?.reason?.includes(`timed-ban:${entry.tag}`)) {
           await guild.bans.remove(entry.targetId, 'Timed ban expired');
@@ -248,8 +419,10 @@ client.on(Events.InteractionCreate, async interaction => {
   try {
     if (!interaction.inGuild() || !interaction.guild) return;
     if (interaction.isChatInputCommand() && interaction.commandName === 'user') await handleCommand(interaction);
-    else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
+    else if (interaction.isButton() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
+    else if (interaction.isButton() && interaction.customId.startsWith('mod:view:')) await handleNavigation(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:submit:')) await handleSubmit(interaction);
+    else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:note:')) await handleNoteSubmit(interaction);
   } catch (error) {
     console.error('Interaction failed:', error);
     if (interaction.isRepliable()) await reply(interaction, 'Something went wrong. Check the bot console.').catch(console.error);

@@ -12,13 +12,20 @@ export function accessLevel(roleIds) {
 }
 
 export function allowedActions(level) {
-  if (level === 'full' || level === 'timed') return ['ban', 'mute', 'kick', 'warn', 'history'];
+  if (level === 'full') return ['ban', 'tempban', 'mute', 'kick', 'warn', 'unban', 'history'];
+  if (level === 'timed') return ['tempban', 'mute', 'kick', 'warn', 'history'];
   if (level === 'limited') return ['mute', 'warn', 'history'];
   return [];
 }
 
-export function canPerform(level, action, durationMs) {
-  if (!allowedActions(level).includes(action)) return false;
-  if (action === 'ban' && level === 'timed' && !durationMs) return false;
-  return true;
+export function canPerform(level, action) {
+  return allowedActions(level).includes(action);
+}
+
+export function visibleActions(level, { canModerate = false, banned = false } = {}) {
+  return allowedActions(level).filter(action => {
+    if (action === 'history') return true;
+    if (action === 'unban') return banned;
+    return canModerate;
+  });
 }
