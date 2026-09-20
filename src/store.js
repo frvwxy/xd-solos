@@ -10,9 +10,14 @@ export function loadState() {
     if (!Array.isArray(state.warnings) || !Array.isArray(state.timedBans)) {
       throw new Error('Invalid moderation data');
     }
+    if (state.history === undefined) {
+      // Preserve warning records created by the first version of the bot.
+      state.history = state.warnings.map(warning => ({ ...warning, action: 'warn' }));
+    }
+    if (!Array.isArray(state.history)) throw new Error('Invalid moderation history');
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    state = { warnings: [], timedBans: [] };
+    state = { warnings: [], timedBans: [], history: [] };
   }
   return state;
 }
@@ -27,4 +32,15 @@ export function saveState() {
 export function getState() {
   if (!state) throw new Error('Moderation data not loaded');
   return state;
+}
+
+export function addHistory(entry) {
+  getState().history.push({ ...entry, at: new Date().toISOString() });
+  saveState();
+}
+
+export function getHistory(guildId, targetId, limit = 10) {
+  return getState().history
+    .filter(entry => entry.guildId === guildId && entry.targetId === targetId)
+    .slice(-limit).reverse();
 }

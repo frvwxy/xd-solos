@@ -5,7 +5,8 @@ import {
   StringSelectMenuBuilder, TextInputBuilder, TextInputStyle,
 } from 'discord.js';
 import { MAX_BAN, MAX_TIMEOUT, parseDuration } from './duration.js';
-import { getState, loadState, saveState } from './store.js';
+import { accessLevel, allowedActions, canPerform } from './policy.js';
+import { addHistory, getHistory, getState, loadState, saveState } from './store.js';
 
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
 if (!DISCORD_TOKEN || !CLIENT_ID || !GUILD_ID) {
@@ -14,19 +15,20 @@ if (!DISCORD_TOKEN || !CLIENT_ID || !GUILD_ID) {
 loadState();
 
 const actions = {
-  ban: { permission: PermissionFlagsBits.BanMembers, verb: 'banned' },
-  mute: { permission: PermissionFlagsBits.ModerateMembers, verb: 'timed out' },
-  kick: { permission: PermissionFlagsBits.KickMembers, verb: 'kicked' },
-  warn: { permission: PermissionFlagsBits.ModerateMembers, verb: 'warned' },
+  ban: { verb: 'banned' },
+  mute: { verb: 'timed out' },
+  kick: { verb: 'kicked' },
+  warn: { verb: 'warned' },
 };
 const pending = new Map();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 const command = new SlashCommandBuilder()
   .setName('user')
-  .setDescription('Moderate a server member')
+  .setDescription('Moderate a member or view their moderation history')
   .setContexts(InteractionContextType.Guild)
-  .addUserOption(option => option.setName('target').setDescription('Member to moderate').setRequired(true));
+  .addUserOption(option => option.setName('target').setDescription('Member to moderate or inspect'))
+  .addStringOption(option => option.setName('user_id').setDescription('Discord user ID, including former members'));
 
 async function reply(interaction, content) {
   const payload = { content, allowedMentions: { parse: [] } };
@@ -59,7 +61,7 @@ async function notify(target, guildName, action, reason, duration) {
   }
 }
 
-function modalFor(action, nonce) {
+function modalFor(action, nonce, timedOnly) {
   const modal = new ModalBuilder().setCustomId(`mod:submit:${nonce}`).setTitle(`${action[0].toUpperCase()}${action.slice(1)} member`);
   modal.addComponents(new ActionRowBuilder().addComponents(
     new TextInputBuilder().setCustomId('reason').setLabel('Reason (optional)').setStyle(TextInputStyle.Paragraph)
@@ -68,31 +70,40 @@ function modalFor(action, nonce) {
   if (action === 'ban' || action === 'mute') {
     modal.addComponents(new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('duration')
-        .setLabel(action === 'ban' ? 'Duration (blank = permanent)' : 'Duration (required)')
+        .setLabel(action === 'ban' && !timedOnly ? 'Duration (blank = permanent)' : 'Duration (required)')
         .setPlaceholder('Examples: 30m, 2h, 7d, 1w')
-        .setStyle(TextInputStyle.Short).setRequired(action === 'mute').setMaxLength(8),
+        .setStyle(TextInputStyle.Short).setRequired(action === 'mute' || timedOnly).setMaxLength(8),
     ));
   }
   return modal;
 }
 
 async function handleCommand(interaction) {
-  const targetId = interaction.options.getUser('target', true).id;
-  const { actor, target } = await resolveMembers(interaction, targetId);
-  if (!target) return reply(interaction, 'That user is not currently a member of this server.');
-  if (!Object.values(actions).some(a => actor.permissions.has(a.permission))) {
-    return reply(interaction, 'You need a moderation permission to use this command.');
+  const selectedUser = interaction.options.getUser('target');
+  const typedId = interaction.options.getString('user_id')?.trim();
+  if ((selectedUser && typedId) || (!selectedUser && !typedId)) {
+    return reply(interaction, 'Provide either target or user_id, but not both.');
   }
-  if (!canActOn(actor, target, interaction.guild)) return reply(interaction, 'You cannot moderate this member due to role hierarchy.');
+  if (typedId && !/^\d{17,20}$/.test(typedId)) return reply(interaction, 'user_id must be a Discord user ID.');
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const targetId = selectedUser?.id ?? typedId;
+  const { actor, target } = await resolveMembers(interaction, targetId);
+  const level = accessLevel(actor.roles.cache.keys());
+  if (level === 'none') return reply(interaction, 'Your roles do not allow use of this moderation command.');
+  const canModerate = target && canActOn(actor, target, interaction.guild);
+  const options = allowedActions(level).filter(action => action === 'history' || canModerate);
 
   const nonce = randomUUID();
   pending.set(nonce, { actorId: actor.id, targetId, guildId: interaction.guildId, expiresAt: Date.now() + 14 * 60_000 });
   const menu = new StringSelectMenuBuilder().setCustomId(`mod:choose:${nonce}`)
     .setPlaceholder('Choose a moderation action')
-    .addOptions(Object.keys(actions).map(action => ({ label: action[0].toUpperCase() + action.slice(1), value: action })));
-  await interaction.reply({
-    content: `Choose an action for ${target.user.username} (${targetId}). Only you can use this menu.`,
-    components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral,
+    .addOptions(options.map(action => ({
+      label: action === 'ban' && level === 'timed' ? 'Temp Ban' : action[0].toUpperCase() + action.slice(1),
+      value: action,
+    })));
+  await interaction.editReply({
+    content: `Choose an action for ${target?.user.username ?? `user ${targetId}`} (${targetId}).${canModerate ? '' : ' Only history is available because this user is not a current member or is above your role.'} Only you can use this menu.`,
+    components: [new ActionRowBuilder().addComponents(menu)],
     allowedMentions: { parse: [] },
   });
 }
@@ -109,9 +120,25 @@ async function handleChoice(interaction) {
   if (!item) return reply(interaction, 'This menu expired or belongs to another moderator. Run /user again.');
   if (item.action) return reply(interaction, 'A form is already open for this menu. Run /user to start over.');
   const action = interaction.values[0];
+  const actor = await interaction.guild.members.fetch(interaction.user.id);
+  const level = accessLevel(actor.roles.cache.keys());
+  if (!allowedActions(level).includes(action)) return reply(interaction, 'Your roles do not allow that action.');
+  if (action === 'history') {
+    pending.delete(nonce);
+    const entries = getHistory(interaction.guildId, item.targetId);
+    const lines = entries.map(entry => {
+      const when = Math.floor(new Date(entry.at).getTime() / 1000);
+      const duration = entry.duration ? ` (${entry.duration})` : '';
+      const reason = (entry.reason ?? 'No reason provided').replace(/\s+/g, ' ').slice(0, 80);
+      return `• <t:${when}:f> — ${entry.action}${duration} — ${reason} — by ${entry.moderatorId ?? 'bot'}`;
+    });
+    return reply(interaction, entries.length ? `Recent history for ${item.targetId}:\n${lines.join('\n')}` : `No recorded history for ${item.targetId}.`);
+  }
   if (!actions[action]) return reply(interaction, 'Unknown action.');
+  const target = await interaction.guild.members.fetch(item.targetId).catch(() => null);
+  if (!target || !canActOn(actor, target, interaction.guild)) return reply(interaction, 'This member is no longer available to moderate.');
   item.action = action;
-  await interaction.showModal(modalFor(action, nonce));
+  await interaction.showModal(modalFor(action, nonce, level === 'timed'));
 }
 
 async function handleSubmit(interaction) {
@@ -129,8 +156,11 @@ async function handleSubmit(interaction) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const { actor, target, bot } = await resolveMembers(interaction, targetId);
+  const level = accessLevel(actor.roles.cache.keys());
+  if (!canPerform(level, action, durationMs)) return reply(interaction, action === 'ban' && level === 'timed' && !durationMs
+    ? 'Your role can only use timed bans. Enter a duration between 1m and 365d.'
+    : 'Your roles no longer allow that action.');
   if (!target) return reply(interaction, 'The target is no longer in this server. No action was taken.');
-  if (!actor.permissions.has(actions[action].permission)) return reply(interaction, `You no longer have permission to ${action} members.`);
   if (!canActOn(actor, target, interaction.guild)) return reply(interaction, 'Role hierarchy prevents this action.');
   if ((action === 'ban' && (!bot.permissions.has(PermissionFlagsBits.BanMembers) || !target.bannable)) ||
       (action === 'kick' && (!bot.permissions.has(PermissionFlagsBits.KickMembers) || !target.kickable)) ||
@@ -170,8 +200,15 @@ async function handleSubmit(interaction) {
         }
       }
     }
+    let historySaved = true;
+    try {
+      addHistory({ guildId: interaction.guildId, targetId, moderatorId: actor.id, action, reason, duration: duration || null, dmSent });
+    } catch (error) {
+      historySaved = false;
+      console.error('Action succeeded but history could not be saved:', error);
+    }
     const label = action === 'ban' && !duration ? 'permanently banned' : actions[action].verb;
-    return reply(interaction, `${target.user.username} was ${label}${duration ? ` for ${duration}` : ''}. DM ${dmSent ? 'sent' : 'could not be delivered'}.`);
+    return reply(interaction, `${target.user.username} was ${label}${duration ? ` for ${duration}` : ''}. DM ${dmSent ? 'sent' : 'could not be delivered'}.${historySaved ? '' : ' Warning: history could not be saved.'}`);
   } catch (error) {
     console.error(`${action} failed:`, error);
     return reply(interaction, `Could not ${action} this member. Check my permissions and the console.${dmSent ? ' A DM may already have been sent.' : ''}`);
@@ -192,7 +229,10 @@ async function checkTimedBans() {
           throw error;
         });
         // A manual unban followed by a new ban must never be undone by the old timer.
-        if (ban?.reason?.includes(`timed-ban:${entry.tag}`)) await guild.bans.remove(entry.targetId, 'Timed ban expired');
+        if (ban?.reason?.includes(`timed-ban:${entry.tag}`)) {
+          await guild.bans.remove(entry.targetId, 'Timed ban expired');
+          getState().history.push({ guildId: entry.guildId, targetId: entry.targetId, moderatorId: null, action: 'unban', reason: 'Timed ban expired', at: new Date().toISOString() });
+        }
         getState().timedBans = getState().timedBans.filter(b => b !== entry);
         saveState();
       } catch (error) {
@@ -226,7 +266,7 @@ client.once(Events.ClientReady, () => {
 });
 
 // Guild-scoped commands update quickly while developing; no separate deploy script needed.
-await new REST({ version: '10' }).setToken(DISCORD_TOKEN).put(
-  Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: [command.toJSON()] },
+await new REST({ version: '10' }).setToken(DISCORD_TOKEN).post(
+  Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: command.toJSON() },
 );
 await client.login(DISCORD_TOKEN);
