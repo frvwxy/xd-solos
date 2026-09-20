@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, EmbedBuilder, Events, GatewayIntentBits, InteractionContextType, MessageFlags,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, ContainerBuilder, EmbedBuilder, Events, GatewayIntentBits, InteractionContextType, MessageFlags,
   ModalBuilder, PermissionFlagsBits, REST, Routes, SlashCommandBuilder,
-  TextInputBuilder, TextInputStyle, escapeMarkdown,
+  SectionBuilder, SeparatorBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle, ThumbnailBuilder, escapeMarkdown,
 } from 'discord.js';
 import { MAX_BAN, MAX_TIMEOUT, formatDuration, parseDuration } from './duration.js';
 import { accessLevel, canPerform, visibleActions } from './policy.js';
+import { actionButtons } from './buttons.js';
+import { notificationEmbed } from './notifications.js';
+import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import { addHistory, addNote, getHistory, getNotes, getState, loadState, saveState } from './store.js';
 
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
@@ -23,10 +26,6 @@ const actions = {
   unban: { verb: 'unbanned' },
 };
 const buttonLabels = { ban: 'Ban', tempban: 'Temp Ban', mute: 'Mute', kick: 'Kick', warn: 'Warn', unban: 'Unban', history: 'History' };
-const buttonStyles = {
-  ban: ButtonStyle.Danger, tempban: ButtonStyle.Danger, mute: ButtonStyle.Secondary,
-  kick: ButtonStyle.Secondary, warn: ButtonStyle.Secondary, unban: ButtonStyle.Success, history: ButtonStyle.Primary,
-};
 const pending = new Map();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const CARD_COLOR = 0x8bd8f7;
@@ -72,67 +71,59 @@ async function fetchBan(guild, targetId) {
   });
 }
 
-function profileCard(guildId, targetId, target, ban, user) {
+function profileCard(guildId, targetId, target, ban, user, nonce, available) {
   const status = target ? 'In server' : ban ? 'Banned' : 'Not in server';
   const avatar = user?.displayAvatarURL({ size: 256 });
   const created = user?.createdTimestamp ? Math.floor(user.createdTimestamp / 1000) : null;
   const joined = target?.joinedTimestamp ? Math.floor(target.joinedTimestamp / 1000) : null;
   const timeout = target?.communicationDisabledUntilTimestamp;
   const warningCount = getState().history.filter(entry => entry.guildId === guildId && entry.targetId === targetId && entry.action === 'warn').length;
-  const card = new EmbedBuilder()
-    .setColor(CARD_COLOR)
-    .setAuthor({ name: target?.displayName ?? user?.username ?? 'Unknown user', ...(avatar ? { iconURL: avatar } : {}) })
-    .setDescription(`${user ? `@${escapeMarkdown(user.username)}` : 'Unknown account'} • ID: \`${targetId}\``)
-    .addFields(
-      { name: 'Server status', value: timeout && timeout > Date.now() ? `Timed out until <t:${Math.floor(timeout / 1000)}:f>` : status, inline: true },
-      { name: 'Top role', value: target && target.roles.highest.id !== target.guild.id ? escapeMarkdown(target.roles.highest.name) : 'None', inline: true },
-      { name: 'Warnings', value: String(warningCount), inline: true },
-      { name: 'Account created', value: created ? `<t:${created}:D> (<t:${created}:R>)` : 'Unknown' },
-      { name: 'Joined server', value: joined ? `<t:${joined}:D> (<t:${joined}:R>)` : 'Not currently a member' },
-    );
-  if (avatar) card.setThumbnail(avatar);
+  const statusText = timeout && timeout > Date.now() ? `Timed out until <t:${Math.floor(timeout / 1000)}:f>` : status;
+  const topRole = target && target.roles.highest.id !== target.guild.id ? escapeMarkdown(target.roles.highest.name) : 'None';
+  const identity = new TextDisplayBuilder().setContent([
+    `**${escapeMarkdown(target?.displayName ?? user?.username ?? 'Unknown user')}**`,
+    `${user ? `@${escapeMarkdown(user.username)}` : 'Unknown account'} • ID: \`${targetId}\``,
+  ].join('\n'));
+  const details = new TextDisplayBuilder().setContent([
+    `**Server status:** ${statusText}`,
+    `**Top role:** ${topRole} • **Warnings:** ${warningCount}`,
+    `**Account created:** ${created ? `<t:${created}:D> (<t:${created}:R>)` : 'Unknown'}`,
+    `**Joined server:** ${joined ? `<t:${joined}:D> (<t:${joined}:R>)` : 'Not currently a member'}`,
+  ].join('\n'));
+  const card = new ContainerBuilder().setAccentColor(CARD_COLOR);
+  if (avatar) {
+    card.addSectionComponents(new SectionBuilder()
+      .addTextDisplayComponents(identity)
+      .setThumbnailAccessory(new ThumbnailBuilder().setURL(avatar)));
+  } else {
+    card.addTextDisplayComponents(identity);
+  }
+  card.addTextDisplayComponents(details);
+  card.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+  card.addActionRowComponents(...actionButtons(nonce, available));
   return card;
-}
-
-function actionButtons(nonce, available) {
-  const buttons = available.filter(action => action !== 'history').map(action => new ButtonBuilder()
-    .setCustomId(`mod:choose:${nonce}:${action}`)
-    .setLabel(buttonLabels[action])
-    .setStyle(buttonStyles[action]));
-  const rows = [];
-  for (let index = 0; index < buttons.length; index += 3) {
-    rows.push(new ActionRowBuilder().addComponents(buttons.slice(index, index + 3)));
-  }
-  if (available.includes('history')) {
-    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
-      .setCustomId(`mod:choose:${nonce}:history`)
-      .setLabel(buttonLabels.history)
-      .setStyle(buttonStyles.history)));
-  }
-  return rows;
 }
 
 function panelButtons(nonce, buttons) {
   return [new ActionRowBuilder().addComponents(buttons.map(([view, label]) =>
     new ButtonBuilder().setCustomId(`mod:view:${nonce}:${view}`).setLabel(label)
-      .setStyle(view.startsWith('back') ? ButtonStyle.Secondary : ButtonStyle.Primary)))];
+      .setStyle(ButtonStyle.Secondary)))];
 }
 
 function panel(title, subtitle, description) {
-  return new EmbedBuilder().setColor(CARD_COLOR).setTitle(title)
-    .setDescription(`${subtitle}\n\n${description}`);
+  return new ContainerBuilder().setAccentColor(CARD_COLOR)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`**${title}**\n${subtitle}\n\n${description}`));
 }
 
 function panelPayload(nonce, item, view) {
   const subtitle = `Discord user \`${item.targetId}\``;
   if (view === 'profile') {
-    return { embeds: [item.profile], components: actionButtons(nonce, item.available) };
+    return { components: [item.profile] };
   }
   if (view === 'records') {
-    return {
-      embeds: [panel('User records', subtitle, 'What would you like to open?')],
-      components: panelButtons(nonce, [['notes', '📝 Notes'], ['history', '📁 Moderation History'], ['backprofile', 'Back']]),
-    };
+    const card = panel('User records', subtitle, 'What would you like to open?');
+    card.addActionRowComponents(...panelButtons(nonce, [['notes', '📝 Notes'], ['history', '📁 Moderation History'], ['backprofile', 'Back']]));
+    return { components: [card] };
   }
   if (view === 'history') {
     const entries = getHistory(item.guildId, item.targetId);
@@ -143,16 +134,14 @@ function panelPayload(nonce, item, view) {
       const reason = (entry.reason ?? 'No reason provided').replace(/\s+/g, ' ').slice(0, 80);
       return `• <t:${when}:f> — ${buttonLabels[entry.action] ?? entry.action}${duration} — ${reason} — by ${entry.moderatorId ?? 'bot'}`;
     });
-    return {
-      embeds: [panel('Moderation History', `${subtitle} • ${total} record(s)`, lines.join('\n') || 'No moderation history was found for this user.')],
-      components: panelButtons(nonce, [['backrecords', 'Back']]),
-    };
+    const card = panel('Moderation History', `${subtitle} • ${total} record(s)`, lines.join('\n') || 'No moderation history was found for this user.');
+    card.addActionRowComponents(...panelButtons(nonce, [['backrecords', 'Back']]));
+    return { components: [card] };
   }
   if (view === 'notes') {
-    return {
-      embeds: [panel('Notes', subtitle, 'Add a private moderator note or review existing notes.')],
-      components: panelButtons(nonce, [['addnote', 'Add Note'], ['viewnotes', 'View Notes'], ['backrecords', 'Back']]),
-    };
+    const card = panel('Notes', subtitle, 'Add a private moderator note or review existing notes.');
+    card.addActionRowComponents(...panelButtons(nonce, [['addnote', 'Add Note'], ['viewnotes', 'View Notes'], ['backrecords', 'Back']]));
+    return { components: [card] };
   }
   const notes = getNotes(item.guildId, item.targetId);
   const total = getState().notes.filter(note => note.guildId === item.guildId && note.targetId === item.targetId).length;
@@ -160,10 +149,9 @@ function panelPayload(nonce, item, view) {
     const when = Math.floor(new Date(note.at).getTime() / 1000);
     return `• <t:${when}:f> — ${note.text.replace(/\s+/g, ' ').slice(0, 250)} — by ${note.authorId}`;
   });
-  return {
-    embeds: [panel('Private Notes', `${subtitle} • ${total} note(s)`, lines.join('\n') || 'No notes were found for this user.')],
-    components: panelButtons(nonce, [['backnotes', 'Back']]),
-  };
+  const card = panel('Private Notes', `${subtitle} • ${total} note(s)`, lines.join('\n') || 'No notes were found for this user.');
+  card.addActionRowComponents(...panelButtons(nonce, [['backnotes', 'Back']]));
+  return { components: [card] };
 }
 
 function saveHistorySafely(entry) {
@@ -176,14 +164,9 @@ function saveHistorySafely(entry) {
   }
 }
 
-async function notify(target, guildName, action, reason, duration) {
-  const card = new EmbedBuilder()
-    .setColor(CARD_COLOR)
-    .setTitle('Moderation notice')
-    .setDescription(`You have been ${actions[action].verb} in **${escapeMarkdown(guildName)}**.`)
-    .addFields({ name: 'Reason', value: reason });
-  if (duration) card.addFields({ name: 'Duration', value: formatDuration(duration) });
+async function notify(target, guild, moderator, action, reason, duration) {
   try {
+    const card = notificationEmbed(guild, moderator, action, reason, duration);
     await target.send({ embeds: [card], allowedMentions: { parse: [] } });
     return true;
   } catch (error) {
@@ -192,7 +175,7 @@ async function notify(target, guildName, action, reason, duration) {
   }
 }
 
-function modalFor(action, nonce) {
+function modalFor(action, nonce, formId) {
   if (action === 'addnote') {
     return new ModalBuilder().setCustomId(`mod:note:${nonce}`).setTitle('Add moderator note')
       .addComponents(new ActionRowBuilder().addComponents(
@@ -201,7 +184,7 @@ function modalFor(action, nonce) {
           .setPlaceholder('Write a note visible only to moderators'),
       ));
   }
-  const modal = new ModalBuilder().setCustomId(`mod:submit:${nonce}:${action}`).setTitle(`${buttonLabels[action]} user`);
+  const modal = new ModalBuilder().setCustomId(`mod:submit:${nonce}:${action}:${formId}`).setTitle(`${buttonLabels[action]} user`);
   modal.addComponents(new ActionRowBuilder().addComponents(
     new TextInputBuilder().setCustomId('reason').setLabel(action === 'ban' ? 'Reason (required)' : 'Reason (optional)')
       .setStyle(TextInputStyle.Paragraph).setRequired(action === 'ban')
@@ -245,30 +228,28 @@ async function handleCommand(interaction) {
   const nonce = randomUUID();
   pending.set(nonce, {
     actorId: actor.id, targetId, guildId: interaction.guildId,
-    available: options, profile: profileCard(interaction.guildId, targetId, target, ban, user),
-    expiresAt: Date.now() + 14 * 60_000,
+    available: options, profile: profileCard(interaction.guildId, targetId, target, ban, user, nonce, options),
+    forms: new Map(), busy: false,
+    expiresAt: Date.now() + CARD_IDLE_MS,
   });
   await interaction.editReply({
-    embeds: [pending.get(nonce).profile],
-    components: actionButtons(nonce, options),
+    content: null,
+    embeds: null,
+    flags: MessageFlags.IsComponentsV2,
+    components: [pending.get(nonce).profile],
     allowedMentions: { parse: [] },
   });
 }
 
 function getPending(interaction, nonce) {
-  const item = pending.get(nonce);
-  if (!item || item.expiresAt < Date.now() || item.actorId !== interaction.user.id || item.guildId !== interaction.guildId) return null;
-  return item;
+  return getPendingCard(pending, nonce, interaction.user.id, interaction.guildId);
 }
 
 async function showView(interaction, nonce, item, view) {
   await interaction.deferUpdate();
   const actor = await interaction.guild.members.fetch(interaction.user.id);
   if (!canPerform(accessLevel(actor.roles.cache.keys()), 'history')) {
-    return interaction.editReply({
-      embeds: [panel('Access denied', `Discord user \`${item.targetId}\``, 'Your roles no longer allow access to these records.')],
-      components: [],
-    });
+    return interaction.editReply({ components: [panel('Access denied', `Discord user \`${item.targetId}\``, 'Your roles no longer allow access to these records.')] });
   }
   return interaction.editReply({ ...panelPayload(nonce, item, view), allowedMentions: { parse: [] } });
 }
@@ -280,6 +261,9 @@ async function showPrivateRecords(interaction, nonce, item) {
     return reply(interaction, 'Your roles no longer allow access to these records.');
   }
   return interaction.editReply({
+    content: null,
+    embeds: null,
+    flags: MessageFlags.IsComponentsV2,
     ...panelPayload(nonce, item, 'records'),
     allowedMentions: { parse: [] },
   });
@@ -289,7 +273,6 @@ async function handleNavigation(interaction) {
   const [nonce, requested] = interaction.customId.slice('mod:view:'.length).split(':');
   const item = getPending(interaction, nonce);
   if (!item) return reply(interaction, 'This card expired. Run /user again.');
-  if (item.used) return reply(interaction, 'This card was already used. Run /user again.');
   if (requested === 'addnote') return interaction.showModal(modalFor('addnote', nonce));
   const views = {
     notes: 'notes', history: 'history', viewnotes: 'viewnotes',
@@ -304,18 +287,23 @@ async function handleChoice(interaction) {
   const [nonce, action] = interaction.customId.slice('mod:choose:'.length).split(':');
   const item = getPending(interaction, nonce);
   if (!item) return reply(interaction, 'This card expired or belongs to another moderator. Run /user again.');
-  if (item.used) return reply(interaction, 'This card was already used. Run /user again.');
   if (!item.available.includes(action)) return reply(interaction, 'That action is not available on this card.');
   if (action === 'history') return showPrivateRecords(interaction, nonce, item);
   if (!actions[action]) return reply(interaction, 'Unknown action.');
-  await interaction.showModal(modalFor(action, nonce));
+  const formId = randomUUID();
+  item.forms.set(formId, action);
+  try {
+    await interaction.showModal(modalFor(action, nonce, formId));
+  } catch (error) {
+    item.forms.delete(formId);
+    throw error;
+  }
 }
 
 async function handleNoteSubmit(interaction) {
   const nonce = interaction.customId.slice('mod:note:'.length);
   const item = getPending(interaction, nonce);
   if (!item) return reply(interaction, 'This card expired. Run /user again.');
-  if (item.used) return reply(interaction, 'This card was already used. Run /user again.');
   const note = interaction.fields.getTextInputValue('note').trim();
   if (!note) return reply(interaction, 'The note cannot be empty.');
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -333,12 +321,13 @@ async function handleNoteSubmit(interaction) {
 }
 
 async function handleSubmit(interaction) {
-  const [nonce, action] = interaction.customId.slice('mod:submit:'.length).split(':');
+  const [nonce, action, formId] = interaction.customId.slice('mod:submit:'.length).split(':');
   const item = getPending(interaction, nonce);
-  if (!item || item.used || !item.available.includes(action) || !actions[action]) {
-    return reply(interaction, 'This form expired or was already used. Run /user again.');
+  if (!item || !item.available.includes(action) || !actions[action] || item.forms.get(formId) !== action) {
+    return reply(interaction, 'This form expired or was already submitted. Open the action again from /user.');
   }
-  const { targetId } = item;
+  item.forms.delete(formId);
+  if (item.busy) return reply(interaction, 'Another action from this card is in progress. Try again shortly.');
   const enteredReason = interaction.fields.fields.has('reason') ? interaction.fields.getTextInputValue('reason').trim() : '';
   if (action === 'ban' && !enteredReason) return reply(interaction, 'A reason is required for a permanent ban.');
   const reason = enteredReason || 'No reason provided';
@@ -348,8 +337,16 @@ async function handleSubmit(interaction) {
   if (action === 'mute' && !durationMs) return reply(interaction, 'Mute duration is required: 1m to 28d (e.g. 30m, 2h, 7d).');
   if (action === 'tempban' && !durationMs) return reply(interaction, 'Temp ban duration is required: 1m to 365d (e.g. 2h, 7d).');
 
-  item.used = true;
-  pending.delete(nonce);
+  item.busy = true;
+  try {
+    return await performAction(interaction, item, action, reason, duration, durationMs);
+  } finally {
+    item.busy = false;
+  }
+}
+
+async function performAction(interaction, item, action, reason, duration, durationMs) {
+  const { targetId } = item;
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const { actor, target, bot } = await resolveMembers(interaction, targetId);
   const level = accessLevel(actor.roles.cache.keys());
@@ -363,7 +360,7 @@ async function handleSubmit(interaction) {
       if (!ban) return reply(interaction, 'This user is no longer banned.');
       await interaction.guild.bans.remove(targetId, auditReason);
       getState().timedBans = getState().timedBans.filter(entry => entry.guildId !== interaction.guildId || entry.targetId !== targetId);
-      const dmSent = await notify(ban.user, interaction.guild.name, action, reason);
+      const dmSent = await notify(ban.user, interaction.guild, actor, action, reason);
       const historySaved = saveHistorySafely({ guildId: interaction.guildId, targetId, moderatorId: actor.id, action, reason, duration: null, dmSent });
       return reply(interaction, `${ban.user.username} was unbanned. DM ${dmSent ? 'sent' : 'could not be delivered'}.${historySaved ? '' : ' Warning: history could not be saved.'}`);
     } catch (error) {
@@ -385,13 +382,13 @@ async function handleSubmit(interaction) {
     if (action === 'warn') {
       getState().warnings.push({ guildId: interaction.guildId, targetId, moderatorId: actor.id, reason, at: new Date().toISOString() });
       saveState();
-      dmSent = await notify(target, interaction.guild.name, action, reason);
+      dmSent = await notify(target, interaction.guild, actor, action, reason);
     } else if (action === 'mute') {
       await target.timeout(durationMs, auditReason);
-      dmSent = await notify(target, interaction.guild.name, action, reason, duration);
+      dmSent = await notify(target, interaction.guild, actor, action, reason, duration);
     } else {
       // DM before removal: once kicked/banned, the bot may no longer share a server with this user.
-      dmSent = await notify(target, interaction.guild.name, action, reason, duration || undefined);
+      dmSent = await notify(target, interaction.guild, actor, action, reason, duration || undefined);
       if (action === 'kick') await target.kick(auditReason);
       else {
         let entry;
