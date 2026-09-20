@@ -1,6 +1,6 @@
 # Basic Discord moderation bot
 
-One `/user` slash command opens a private Discord profile card with the user's avatar, ID, server status, top role, warning count, and account/join dates. Buttons offer the permitted actions: Ban, Temp Ban, Mute (Discord timeout), Kick, Warn, Unban, and History. History opens a private records panel with **Notes** and **Moderation History**; each view has Back navigation. Notes can be added or reviewed by authorized moderators and are never sent to the user. Use `/user target:@member` for someone still in the server, or `/user user_id:123...` to view a former member's records or unban them. Provide one of those options, not both. Each moderation action opens a reason form. Permanent Ban requires a reason; Temp Ban and Mute require a duration; Ban is permanent. Durations use `m`, `h`, `d`, or `w` (for example `30m`, `2h`, `7d`), up to 365 days for a timed ban and 28 days for a mute.
+One `/user` slash command posts a public, light-blue Discord embed with the user's avatar, ID, server status, top role, warning count, and account/join dates. The moderation buttons are arranged in smaller rows below the embed: Ban, Temp Ban, Mute (Discord timeout), Kick, Warn, Unban, and History, depending on the moderator's role. Discord does not support buttons inside embeds. Only the moderator who ran `/user` can use that card's buttons. History responds separately and ephemerally with **Notes** and **Moderation History** embeds; those records are not posted to the channel. Notes can be added or reviewed by authorized moderators and are never sent to the user. Use `/user target:@member` for someone still in the server, or `/user user_id:123...` to view a former member's records or unban them. Provide one of those options, not both. Each moderation action opens a reason form. Permanent Ban requires a reason; Temp Ban and Mute require a duration; Ban is permanent. Durations use `m`, `h`, `d`, or `w` (for example `30m`, `2h`, `7d`), up to 365 days for a timed ban and 28 days for a mute. Displayed durations use readable names, such as `5 Minutes` and `1 Day`.
 
 ## Staff roles
 
@@ -12,13 +12,13 @@ The IDs in `src/policy.js` are treated as **Discord role IDs**, not individual u
 | `1547023304219697152` | Temp Ban, Mute, Kick, Warn, History |
 | `1547023404157378641` | Mute, warn, history |
 
-These roles do not need Discord's native moderation permissions; the **bot** needs Ban Members, Kick Members, and Moderate Members. Moderators must still have a higher role than the target. Members with none of the listed roles cannot use `/user`.
+These roles do not need Discord's native moderation permissions; the **bot** needs Ban Members, Kick Members, Moderate Members, and Embed Links. Moderators must still have a higher role than the target. Members with none of the listed roles cannot use `/user`.
 
 ## Setup
 
 1. Install Node.js 20+ and run `npm install` in this folder.
 2. Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications). Copy `.env.example` to `.env` and fill in the bot token, application/client ID, and your test server ID. Never commit or share `.env`.
-3. Invite the bot using OAuth2 scopes `bot` and `applications.commands`. Give the **bot** Ban Members, Kick Members, and Moderate Members, and put its role above members it will moderate. The authorized staff roles must also be above their targets. Restrict `/user` in Server Settings → Integrations if desired; the bot enforces the role list regardless of that setting.
+3. Invite the bot using OAuth2 scopes `bot` and `applications.commands`. Give the **bot** Ban Members, Kick Members, Moderate Members, and Embed Links, and put its role above members it will moderate. The authorized staff roles must also be above their targets. Restrict `/user` in Server Settings → Integrations if desired; the bot enforces the role list regardless of that setting.
 4. Run `npm start`. The bot registers `/user` in the configured server on startup. Run `npm test` for the duration parser tests.
 
 ## Deploy with Coolify
@@ -29,4 +29,4 @@ In Coolify, add `DISCORD_TOKEN`, `CLIENT_ID`, and `GUILD_ID` as **runtime** envi
 
 Warnings, timed bans, moderation history, and moderator notes are saved in `data/moderation.json`. Keep this file across restarts. History and Notes each show the 10 most recent records for the selected user. Warnings saved by the earlier bot version appear in history automatically; earlier kicks, mutes, and bans cannot be reconstructed. Unban is available only to full-access roles, and only when the user is currently banned. The bot checks expired bans every 30 seconds and on startup; it only unbans a user if the current ban still has that timed ban's marker. Keep the bot online near expiry if precise timing matters. This starter targets one server and runs one bot process.
 
-DMs are attempted for every successful action. For kick/ban they are attempted before removal, since DMs may become unavailable afterward; if the subsequent action fails, a DM may already have been sent. Closed DMs do not block moderation, and the private result reports delivery status. A warning is stored before its DM attempt.
+DMs are attempted for every successful action and use embeds. For kick/ban they are attempted before removal, since DMs may become unavailable afterward; if the subsequent action fails, a DM may already have been sent. Closed DMs do not block moderation, and the ephemeral embed reports delivery status. A warning is stored before its DM attempt.

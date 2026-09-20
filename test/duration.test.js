@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MAX_BAN, MAX_TIMEOUT, parseDuration } from '../src/duration.js';
+import { MAX_BAN, MAX_TIMEOUT, formatDuration, parseDuration } from '../src/duration.js';
+
+test('formats durations for moderator results, DMs, and history', () => {
+  assert.equal(formatDuration('5m'), '5 Minutes');
+  assert.equal(formatDuration('1d'), '1 Day');
+  assert.equal(formatDuration(' 2H '), '2 Hours');
+  assert.equal(formatDuration('1w'), '1 Week');
+  assert.equal(formatDuration('30s'), '30s');
+});
 
 test('parses supported units and whitespace', () => {
   assert.equal(parseDuration(' 2h ', MAX_TIMEOUT), 7_200_000);
