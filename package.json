@@ -1,0 +1,14 @@
+{
+  "name": "basic-moderation-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node --env-file=.env src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0"
+  }
+}
