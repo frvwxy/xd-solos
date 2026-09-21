@@ -10,6 +10,7 @@ import { actionButtons } from './buttons.js';
 import { notificationEmbed } from './notifications.js';
 import { postModLog } from './modlogs.js';
 import { postWelcome } from './welcome.js';
+import { deliverTryout, tryoutCommand } from './tryout.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import { addHistory, addNote, getHistory, getNotes, getState, loadState, saveState } from './store.js';
 
@@ -251,6 +252,23 @@ async function handleCommand(interaction) {
   });
 }
 
+async function handleTryout(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const actor = await interaction.guild.members.fetch(interaction.user.id);
+  if (accessLevel(actor.roles.cache.keys()) === 'none') {
+    return reply(interaction, 'Your roles do not allow use of this command.');
+  }
+  const user = interaction.options.getUser('user');
+  if (!user || user.bot) return reply(interaction, 'Choose a server member, not a bot.');
+  const member = await interaction.guild.members.fetch({ user: user.id, force: true }).catch(() => null);
+  if (!member) return reply(interaction, 'That user is not in this server. No tryout instructions were sent.');
+  const channel = interaction.channel ?? await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
+  const result = await deliverTryout(member, channel);
+  if (result.dmError) console.warn(`Could not send tryout DM to ${user.id}:`, result.dmError);
+  if (result.channelError) console.warn(`Could not post tryout in ${interaction.channelId}:`, result.channelError);
+  return reply(interaction, `Tryout for ${escapeMarkdown(user.username)}: channel post ${result.channelSent ? 'sent' : 'failed'}; DM ${result.dmSent ? 'sent' : 'failed'}.`);
+}
+
 function getPending(interaction, nonce) {
   return getPendingCard(pending, nonce, interaction.user.id, interaction.guildId);
 }
@@ -467,6 +485,7 @@ client.on(Events.InteractionCreate, async interaction => {
   try {
     if (!interaction.inGuild() || !interaction.guild) return;
     if (interaction.isChatInputCommand() && interaction.commandName === 'user') await handleCommand(interaction);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'tryout') await handleTryout(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:view:')) await handleNavigation(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:submit:')) await handleSubmit(interaction);
@@ -490,8 +509,9 @@ client.once(Events.ClientReady, () => {
   }, 60_000);
 });
 
-// Guild-scoped commands update quickly while developing; no separate deploy script needed.
-await new REST({ version: '10' }).setToken(DISCORD_TOKEN).post(
-  Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: command.toJSON() },
-);
+// POST upserts each guild command without deleting any other commands in the server.
+const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+for (const guildCommand of [command, tryoutCommand]) {
+  await rest.post(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: guildCommand.toJSON() });
+}
 await client.login(DISCORD_TOKEN);

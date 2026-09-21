@@ -4,6 +4,8 @@ One `/user` slash command posts a public, light-blue Discord card with the user'
 
 The card uses two compact button rows and explains a disabled Unban button. A member still in the server is not banned, so Unban is unavailable even to a full-access moderator. To unban someone, open `/user user_id:...` for a currently banned account. The bot also needs Ban Members permission.
 
+`/tryout user:@member` sends that server member a light-blue DM saying their xd tryout is starting, asking them to go to the leash area, and providing a **Join Private Server** link button. It also posts the same embed and button in the channel where the command was run, pinging only the selected user. Everyone who can view that channel can see and use the private-server link. It is available to the same staff roles as `/user`. A private confirmation reports whether the channel post and DM each succeeded; one is still attempted if the other fails. The bot needs View Channel, Send Messages, Embed Links, and Mention Everyone is **not** required in the command channel.
+
 ## Staff roles
 
 The IDs in `src/policy.js` are treated as **Discord role IDs**, not individual user IDs. The bot checks these roles when the menu is opened and again when an action is submitted.
@@ -14,14 +16,14 @@ The IDs in `src/policy.js` are treated as **Discord role IDs**, not individual u
 | `1547023304219697152` | Temp Ban, Mute, Kick, Warn, History |
 | `1547023404157378641` | Mute, warn, history |
 
-These roles do not need Discord's native moderation permissions; the **bot** needs Ban Members, Kick Members, Moderate Members, and Embed Links. Moderators must still have a higher role than the target. Members with none of the listed roles cannot use `/user`.
+These roles do not need Discord's native moderation permissions; the **bot** needs Ban Members, Kick Members, Moderate Members, and Embed Links. Moderators must still have a higher role than the target for moderation actions. Members with none of the listed roles cannot use `/user` or `/tryout`.
 
 ## Setup
 
 1. Install Node.js 20+ and run `npm install` in this folder.
 2. Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications). Under **Bot → Privileged Gateway Intents**, enable **Server Members Intent** so the bot receives member-join events. Copy `.env.example` to `.env` and fill in the bot token, application/client ID, and your server ID (`1547021317193080882` for the configured welcome/verification links). Never commit or share `.env`.
 3. Invite the bot using OAuth2 scopes `bot` and `applications.commands`. Give the **bot** Ban Members, Kick Members, Moderate Members, and Embed Links, and put its role above members it will moderate. It also needs View Channel, Send Messages, and Embed Links in welcome channel `1547022446748508210`. The authorized staff roles must also be above their targets. Restrict `/user` in Server Settings → Integrations if desired; the bot enforces the role list regardless of that setting.
-4. Run `npm start`. The bot registers `/user` in the configured server on startup. Run `npm test` for the duration parser tests.
+4. Run `npm start`. The bot registers `/user` and `/tryout` in the configured server on startup. Run `npm test` for the automated tests.
 
 ## Deploy with Coolify
 
