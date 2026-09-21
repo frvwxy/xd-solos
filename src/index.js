@@ -13,6 +13,7 @@ import { postWelcome } from './welcome.js';
 import { canUseTryout, deliverTryout, tryoutCommand } from './tryout.js';
 import { acceptCommand, canUseAccept, deliverAcceptance, grantAcceptanceRoles } from './accept.js';
 import { postAcceptanceLog } from './acceptlogs.js';
+import { updateMemberCount } from './membercount.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import { addHistory, addNote, getHistory, getNotes, getState, loadState, saveState } from './store.js';
 
@@ -301,11 +302,19 @@ async function handleAccept(interaction) {
   const result = await deliverAcceptance(member, channel);
   if (result.dmError) console.warn(`Could not send acceptance DM to ${user.id}:`, result.dmError);
   if (result.channelError) console.warn(`Could not post acceptance in ${interaction.channelId}:`, result.channelError);
+  let memberCount = null;
+  let countUpdated = true;
+  try {
+    ({ count: memberCount } = await updateMemberCount(interaction.guild));
+  } catch (error) {
+    countUpdated = false;
+    console.error('Could not update the xd member count channel:', error);
+  }
   const logSent = await postAcceptanceLog(interaction.guild, {
     targetId: user.id, moderatorId: actor.id, addedRoleIds,
     channelSent: result.channelSent, dmSent: result.dmSent,
   });
-  return reply(interaction, `${escapeMarkdown(user.username)} received the acceptance roles. Channel announcement ${result.channelSent ? 'sent' : 'failed'}; DM ${result.dmSent ? 'sent' : 'failed'}.${logSent ? '' : ' Warning: acceptance log could not be posted.'}`);
+  return reply(interaction, `${escapeMarkdown(user.username)} received the acceptance roles. Channel announcement ${result.channelSent ? 'sent' : 'failed'}; DM ${result.dmSent ? 'sent' : 'failed'}.${countUpdated ? ` Member count updated to ${memberCount}.` : ' Warning: member count channel could not be updated.'}${logSent ? '' : ' Warning: acceptance log could not be posted.'}`);
 }
 
 function getPending(interaction, nonce) {
