@@ -13,7 +13,7 @@ export const tryoutCommand = new SlashCommandBuilder()
 
 function tryoutCard(guild) {
   const card = cardWithHeader(guild,
-    '**Your tryout for xd is starting now!**\nJoin the private server below to begin. Please make your way to the leash area.',
+    '**Your tryout for xd is starting now!**\nJoin the private server below to begin.\nPlease make your way to the leash area.',
     0x8bd8f7);
   addDivider(card);
   const row = new ActionRowBuilder().addComponents(

@@ -20,7 +20,8 @@ test('tryout DM has a divider before its private-server button', () => {
   const button = card.components[2].components[0];
   assert.equal(message.flags, MessageFlags.IsComponentsV2);
   assert.match(card.components[0].components[0].content, /tryout for xd is starting now/);
-  assert.match(card.components[0].components[0].content, /leash area/);
+  assert.match(card.components[0].components[0].content,
+    /Join the private server below to begin\.\nPlease make your way to the leash area\./);
   assert.equal(card.components[0].accessory.media.url, guild.iconURL());
   assert.equal(card.components[1].type, ComponentType.Separator);
   assert.equal(card.components[1].divider, true);

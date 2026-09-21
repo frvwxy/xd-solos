@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ComponentType, MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { MessageFlags, PermissionFlagsBits } from 'discord.js';
 import {
   ACCEPT_COMMAND_ROLE_IDS, ACCEPT_ROLE_IDS, acceptCommand, acceptanceChannelMessage, acceptanceMessage,
   canUseAccept, deliverAcceptance, grantAcceptanceRoles,
@@ -48,16 +48,15 @@ test('/accept is available to exactly the four requested staff roles', () => {
   assert.equal(canUseAccept(['123', ACCEPT_COMMAND_ROLE_IDS[0]]), true);
 });
 
-test('acceptance cards include a divider and channel post pings only the selected user', () => {
+test('acceptance cards keep the tagline beside the icon without a divider and channel post pings only the selected user', () => {
   const dm = acceptanceMessage(guild);
   const post = acceptanceChannelMessage(guild, '123456789012345678');
   const card = dm.components[0].toJSON();
   assert.equal(dm.flags, MessageFlags.IsComponentsV2);
-  assert.match(card.components[0].components[0].content, /Congratulations and welcome to xd/);
+  assert.match(card.components[0].components[0].content, /Congratulations!\*\*\nWelcome to xd/);
   assert.equal(card.components[0].accessory.media.url, guild.iconURL());
-  assert.equal(card.components[1].type, ComponentType.Separator);
-  assert.equal(card.components[1].divider, true);
-  assert.equal(card.components[2].content, '*be comp. be xd.*');
+  assert.equal(card.components.length, 1);
+  assert.match(card.components[0].components[0].content, /\*be comp\. be xd\.\*/);
   assert.deepEqual(dm.allowedMentions, { parse: [] });
   assert.equal(post.components[0].toJSON().content, '<@123456789012345678>');
   assert.deepEqual(post.allowedMentions, { parse: [], users: ['123456789012345678'] });

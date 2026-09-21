@@ -1,5 +1,5 @@
-import { InteractionContextType, PermissionFlagsBits, SlashCommandBuilder, TextDisplayBuilder } from 'discord.js';
-import { addDivider, cardMessage, cardWithHeader } from './cards.js';
+import { InteractionContextType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { cardMessage, cardWithHeader } from './cards.js';
 
 export const ACCEPT_ROLE_IDS = [
   '1551356027973148802',
@@ -29,11 +29,9 @@ export const acceptCommand = new SlashCommandBuilder()
   .addUserOption(option => option.setName('user').setDescription('Member to accept').setRequired(true));
 
 function acceptanceCard(guild) {
-  const card = cardWithHeader(guild,
-    "**Congratulations and welcome to xd!**\nYou've been accepted. We're glad to have you with us!",
+  return cardWithHeader(guild,
+    "**Congratulations!**\nWelcome to xd. We're glad to have you with us.\n\n*be comp. be xd.*",
     0x8bd8f7);
-  addDivider(card);
-  return card.addTextDisplayComponents(new TextDisplayBuilder().setContent('*be comp. be xd.*'));
 }
 
 export function acceptanceMessage(guild) {

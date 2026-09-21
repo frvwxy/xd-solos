@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, MessageFlags,
-  SectionBuilder, SeparatorBuilder, TextDisplayBuilder, ThumbnailBuilder, escapeMarkdown,
+  SectionBuilder, TextDisplayBuilder, ThumbnailBuilder, escapeMarkdown,
 } from 'discord.js';
 
 export const WELCOME_CHANNEL_ID = '1547022446748508210';
@@ -23,12 +23,10 @@ export function welcomeMessage(member) {
     card.addTextDisplayComponents(introduction);
   }
   card.addTextDisplayComponents(new TextDisplayBuilder().setContent('*be comp. be xd.*'));
-  card.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
-
-  card.addActionRowComponents(new ActionRowBuilder().addComponents(
+  const verifyButton = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setLabel('Verify').setStyle(ButtonStyle.Link).setURL(VERIFY_URL),
-  ));
-  return { components: [card], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
+  );
+  return { components: [card, verifyButton], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
 }
 
 export async function postWelcome(member, channelId = WELCOME_CHANNEL_ID) {

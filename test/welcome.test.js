@@ -10,12 +10,11 @@ const guild = {
 };
 const member = { id: '123', user: { username: 'new_member' }, guild };
 
-test('welcome card has the server icon, native divider, and Verify link', () => {
+test('welcome card has the server icon and a Verify link below the card', () => {
   const message = welcomeMessage(member);
   const card = message.components[0].toJSON();
   const section = card.components[0];
-  const divider = card.components[2];
-  const button = card.components[3].components[0];
+  const button = message.components[1].toJSON().components[0];
   assert.equal(message.flags, MessageFlags.IsComponentsV2);
   assert.equal(message.embeds, undefined);
   assert.equal(card.type, ComponentType.Container);
@@ -24,8 +23,8 @@ test('welcome card has the server icon, native divider, and Verify link', () => 
   assert.match(section.components[0].content, /new\\_member/);
   assert.match(section.components[0].content, /Click \*\*Verify\*\* to get started\./);
   assert.equal(card.components[1].content, '*be comp. be xd.*');
-  assert.equal(divider.type, ComponentType.Separator);
-  assert.equal(divider.divider, true);
+  assert.equal(card.components.length, 2);
+  assert.equal(message.components[1].toJSON().type, ComponentType.ActionRow);
   assert.equal(button.label, 'Verify');
   assert.equal(button.style, ButtonStyle.Link);
   assert.equal(button.url, VERIFY_URL);
@@ -47,5 +46,5 @@ test('welcome posts to the configured channel', async () => {
   assert.equal(await postWelcome(target), true);
   assert.equal(fetched, WELCOME_CHANNEL_ID);
   assert.equal(sent.flags, MessageFlags.IsComponentsV2);
-  assert.equal(sent.components[0].toJSON().components[3].components[0].url, VERIFY_URL);
+  assert.equal(sent.components[1].toJSON().components[0].url, VERIFY_URL);
 });
