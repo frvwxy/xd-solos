@@ -48,3 +48,19 @@ test('automatic unban log identifies the timer', () => {
   assert.match(card.components[0].content, /Automatic timer/);
   assert.match(card.components[2].content, /\*\*DM:\*\* Not attempted/);
 });
+
+test('jail log uses the Jail title', () => {
+  const card = modLogMessage({ iconURL: () => null }, {
+    targetId: event.targetId, moderatorId: event.moderatorId, action: 'jail',
+    reason: 'Restricted to the jail channel', duration: null, dmSent: true,
+  }).components[0].toJSON();
+  assert.match(card.components[0].content, /\*\*Jail\*\*/);
+});
+
+test('unjail log uses the Unjail title', () => {
+  const card = modLogMessage({ iconURL: () => null }, {
+    targetId: event.targetId, moderatorId: event.moderatorId, action: 'unjail',
+    reason: 'Released from jail', duration: null, dmSent: true,
+  }).components[0].toJSON();
+  assert.match(card.components[0].content, /\*\*Unjail\*\*/);
+});

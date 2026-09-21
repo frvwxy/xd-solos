@@ -17,9 +17,11 @@ export function loadState() {
     if (!Array.isArray(state.history)) throw new Error('Invalid moderation history');
     if (state.notes === undefined) state.notes = [];
     if (!Array.isArray(state.notes)) throw new Error('Invalid moderator notes');
+    if (state.jails === undefined) state.jails = [];
+    if (!Array.isArray(state.jails)) throw new Error('Invalid jail records');
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    state = { warnings: [], timedBans: [], history: [], notes: [] };
+    state = { warnings: [], timedBans: [], history: [], notes: [], jails: [] };
   }
   return state;
 }
@@ -56,4 +58,22 @@ export function getNotes(guildId, targetId, limit = 10) {
   return getState().notes
     .filter(entry => entry.guildId === guildId && entry.targetId === targetId)
     .slice(-limit).reverse();
+}
+
+export function getJail(guildId, targetId) {
+  return getState().jails.find(entry => entry.guildId === guildId && entry.targetId === targetId) ?? null;
+}
+
+export function setJail(entry) {
+  const state = getState();
+  state.jails = state.jails.filter(item => item.guildId !== entry.guildId || item.targetId !== entry.targetId);
+  state.jails.push(entry);
+  saveState();
+}
+
+export function removeJail(guildId, targetId) {
+  const state = getState();
+  const before = state.jails.length;
+  state.jails = state.jails.filter(entry => entry.guildId !== guildId || entry.targetId !== targetId);
+  if (state.jails.length !== before) saveState();
 }

@@ -14,8 +14,13 @@ import { canUseTryout, deliverTryout, tryoutCommand } from './tryout.js';
 import { acceptCommand, canUseAccept, deliverAcceptance, grantAcceptanceRoles } from './accept.js';
 import { postAcceptanceLog } from './acceptlogs.js';
 import { updateMemberCount } from './membercount.js';
+import {
+  JAIL_ROLE_ID, canUseJail, jailCommand, jailMember, restoreJailAccess, unjailCommand, unjailMember,
+} from './jail.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
-import { addHistory, addNote, getHistory, getNotes, getState, loadState, saveState } from './store.js';
+import {
+  addHistory, addNote, getHistory, getJail, getNotes, getState, loadState, removeJail, saveState, setJail,
+} from './store.js';
 
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
 if (!DISCORD_TOKEN || !CLIENT_ID || !GUILD_ID) {
@@ -31,8 +36,9 @@ const actions = {
   warn: { verb: 'warned' },
   unban: { verb: 'unbanned' },
 };
-const buttonLabels = { ban: 'Ban', tempban: 'Temp Ban', mute: 'Mute', kick: 'Kick', warn: 'Warn', unban: 'Unban', history: 'History' };
+const buttonLabels = { ban: 'Ban', tempban: 'Temp Ban', mute: 'Mute', kick: 'Kick', warn: 'Warn', unban: 'Unban', jail: 'Jail', unjail: 'Unjail', history: 'History' };
 const pending = new Map();
+const activeUnjails = new Set();
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
 const CARD_COLOR = 0x8bd8f7;
 
@@ -320,6 +326,103 @@ async function handleAccept(interaction) {
   return reply(interaction, `${escapeMarkdown(user.username)} received the acceptance roles. Channel announcement ${result.channelSent ? 'sent' : 'failed'}; DM ${result.dmSent ? 'sent' : 'failed'}.${countUpdated ? ` Member count updated to ${memberCount}.` : ' Warning: member count channel could not be updated.'}${logSent ? '' : ' Warning: acceptance log could not be posted.'}`);
 }
 
+async function handleJail(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const actor = await interaction.guild.members.fetch(interaction.user.id);
+  if (!canUseJail(actor.roles.cache.keys())) {
+    return reply(interaction, 'Your roles do not allow use of /jail.');
+  }
+  const user = interaction.options.getUser('member');
+  if (!user || user.bot) return reply(interaction, 'Choose a server member, not a bot.');
+  const member = await interaction.guild.members.fetch({ user: user.id, force: true }).catch(() => null);
+  if (!member) return reply(interaction, 'That user is not in this server.');
+  if (!canActOn(actor, member, interaction.guild)) return reply(interaction, 'Role hierarchy prevents you from jailing this member.');
+  if (member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return reply(interaction, 'Administrators cannot be jailed because they bypass channel permission overwrites.');
+  }
+
+  const bot = await interaction.guild.members.fetchMe();
+  let snapshots;
+  let removedRoleIds;
+  try {
+    const result = await jailMember(member, bot, actor.id);
+    if (!result.added) return reply(interaction, `${escapeMarkdown(user.username)} is already jailed.`);
+    snapshots = result.snapshots;
+    removedRoleIds = result.removedRoleIds;
+    setJail({
+      guildId: interaction.guildId,
+      targetId: user.id,
+      moderatorId: actor.id,
+      snapshots,
+      removedRoleIds: result.removedRoleIds,
+      at: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`Could not jail ${user.id}:`, error);
+    if (snapshots) {
+      await member.roles.remove(JAIL_ROLE_ID, 'Jail record could not be saved; rolling back').catch(console.error);
+      if (removedRoleIds?.length) {
+        await member.roles.add(removedRoleIds, 'Jail record could not be saved; restoring roles').catch(console.error);
+      }
+      await restoreJailAccess(interaction.guild, user.id, snapshots).catch(console.error);
+    }
+    return reply(interaction, `Could not jail ${escapeMarkdown(user.username)}. ${error.message}`);
+  }
+
+  const reason = 'Restricted to the jail channel';
+  const dmSent = await notify(member, interaction.guild, actor, 'jail', reason, null);
+  const historySaved = saveHistorySafely({
+    guildId: interaction.guildId, targetId: user.id, moderatorId: actor.id,
+    action: 'jail', reason, duration: null, dmSent,
+  });
+  const logSent = await postModLog(interaction.guild, {
+    targetId: user.id, moderatorId: actor.id, action: 'jail', reason, duration: null, dmSent,
+  });
+  return reply(interaction, `${escapeMarkdown(user.username)} was jailed and restricted to the jail channel. DM ${dmSent ? 'sent' : 'failed'}.${historySaved ? '' : ' Warning: history could not be saved.'}${logSent ? '' : ' Warning: moderation log could not be posted.'}`);
+}
+
+async function handleUnjail(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const actor = await interaction.guild.members.fetch(interaction.user.id);
+  if (!canUseJail(actor.roles.cache.keys())) {
+    return reply(interaction, 'Your roles do not allow use of /unjail.');
+  }
+  const user = interaction.options.getUser('member');
+  if (!user || user.bot) return reply(interaction, 'Choose a server member, not a bot.');
+  const member = await interaction.guild.members.fetch({ user: user.id, force: true }).catch(() => null);
+  if (!member) return reply(interaction, 'That user is not in this server.');
+  if (!canActOn(actor, member, interaction.guild)) return reply(interaction, 'Role hierarchy prevents you from unjailing this member.');
+  const record = getJail(interaction.guildId, user.id);
+  if (!record) return reply(interaction, `${escapeMarkdown(user.username)} does not have a saved jail record.`);
+
+  const key = `${interaction.guildId}:${user.id}`;
+  activeUnjails.add(key);
+  let restored;
+  try {
+    const bot = await interaction.guild.members.fetchMe();
+    restored = await unjailMember(member, bot, record, actor.id);
+    removeJail(interaction.guildId, user.id);
+  } catch (error) {
+    console.error(`Could not unjail ${user.id}:`, error);
+    return reply(interaction, `Could not unjail ${escapeMarkdown(user.username)}. ${error.message}`);
+  } finally {
+    activeUnjails.delete(key);
+  }
+
+  const reason = 'Released from jail';
+  const dmSent = await notify(member, interaction.guild, actor, 'unjail', reason, null);
+  const historySaved = saveHistorySafely({
+    guildId: interaction.guildId, targetId: user.id, moderatorId: actor.id,
+    action: 'unjail', reason, duration: null, dmSent,
+  });
+  const logSent = await postModLog(interaction.guild, {
+    targetId: user.id, moderatorId: actor.id, action: 'unjail', reason, duration: null, dmSent,
+  });
+  const skipped = restored.skippedRoleIds.length
+    ? ` ${restored.skippedRoleIds.length} saved role(s) could not be restored because they are missing, managed, or above the bot.` : '';
+  return reply(interaction, `${escapeMarkdown(user.username)} was unjailed and ${restored.restoredRoleIds.length} role(s) were restored.${skipped} DM ${dmSent ? 'sent' : 'failed'}.${historySaved ? '' : ' Warning: history could not be saved.'}${logSent ? '' : ' Warning: moderation log could not be posted.'}`);
+}
+
 function getPending(interaction, nonce) {
   return getPendingCard(pending, nonce, interaction.user.id, interaction.guildId);
 }
@@ -532,12 +635,33 @@ async function checkTimedBans() {
   }
 }
 
+async function reconcileJails() {
+  for (const record of [...getState().jails]) {
+    try {
+      const guild = await client.guilds.fetch(record.guildId);
+      const member = await guild.members.fetch(record.targetId).catch(() => null);
+      if (member?.roles.cache.has(JAIL_ROLE_ID)) continue;
+      if (member) {
+        const bot = await guild.members.fetchMe();
+        await unjailMember(member, bot, record, null, true);
+      } else {
+        await restoreJailAccess(guild, record.targetId, record.snapshots);
+      }
+      removeJail(record.guildId, record.targetId);
+    } catch (error) {
+      console.error(`Could not reconcile jail access for ${record.guildId}/${record.targetId}:`, error);
+    }
+  }
+}
+
 client.on(Events.InteractionCreate, async interaction => {
   try {
     if (!interaction.inGuild() || !interaction.guild) return;
     if (interaction.isChatInputCommand() && interaction.commandName === 'user') await handleCommand(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'tryout') await handleTryout(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'accept') await handleAccept(interaction);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'jail') await handleJail(interaction);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'unjail') await handleUnjail(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:view:')) await handleNavigation(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:submit:')) await handleSubmit(interaction);
@@ -552,9 +676,32 @@ client.on(Events.GuildMemberAdd, member => {
   if (member.guild.id === GUILD_ID && !member.user.bot) void postWelcome(member);
 });
 
+client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
+  if (!oldMember.roles.cache.has(JAIL_ROLE_ID) || newMember.roles.cache.has(JAIL_ROLE_ID)) return;
+  const key = `${newMember.guild.id}:${newMember.id}`;
+  if (activeUnjails.has(key)) return;
+  const record = getJail(newMember.guild.id, newMember.id);
+  if (!record) return;
+  activeUnjails.add(key);
+  void newMember.guild.members.fetchMe()
+    .then(bot => unjailMember(newMember, bot, record, null, true))
+    .then(() => removeJail(newMember.guild.id, newMember.id))
+    .catch(error => console.error(`Could not restore roles and channel access for ${newMember.id}:`, error))
+    .finally(() => activeUnjails.delete(key));
+});
+
+client.on(Events.GuildMemberRemove, member => {
+  const record = getJail(member.guild.id, member.id);
+  if (!record) return;
+  void restoreJailAccess(member.guild, member.id, record.snapshots)
+    .then(() => removeJail(member.guild.id, member.id))
+    .catch(error => console.error(`Could not clean up jail access for departed member ${member.id}:`, error));
+});
+
 client.once(Events.ClientReady, () => {
   console.log(`Ready as ${client.user.tag}`);
   void checkTimedBans();
+  void reconcileJails();
   setInterval(() => void checkTimedBans(), 30_000);
   setInterval(() => {
     for (const [nonce, item] of pending) if (item.expiresAt < Date.now()) pending.delete(nonce);
@@ -563,7 +710,7 @@ client.once(Events.ClientReady, () => {
 
 // POST upserts each guild command without deleting any other commands in the server.
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-for (const guildCommand of [command, tryoutCommand, acceptCommand]) {
+for (const guildCommand of [command, tryoutCommand, acceptCommand, jailCommand, unjailCommand]) {
   await rest.post(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: guildCommand.toJSON() });
 }
 await client.login(DISCORD_TOKEN);

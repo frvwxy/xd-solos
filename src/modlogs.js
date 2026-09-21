@@ -11,6 +11,8 @@ const actionTitles = {
   kick: 'Kick',
   warn: 'Warning',
   unban: 'Unban',
+  jail: 'Jail',
+  unjail: 'Unjail',
 };
 
 export function modLogMessage(guild, { targetId, moderatorId, action, reason, duration, dmSent }) {

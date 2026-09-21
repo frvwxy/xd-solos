@@ -8,6 +8,8 @@ The card uses two compact button rows and explains a disabled Unban button. A me
 
 `/accept user:@member [staff_score] [member_score]` assigns roles `1551356027973148802`, `1551356053168459867`, `1551356073334804531`, `1551356086076969010`, `1547023363900313620`, and `1551398064621887528`, then posts a compact welcome card in the command channel with a ping for that member and sends them a DM. The optional staff and member scores accept unrestricted integer inputs and are displayed as entered in the announcement, DM, and staff acceptance log. Either score may be used independently. The command is available only to roles `1547023404157378641`, `1547023304219697152`, `1547023959118192680`, `1550346816351113356`, and `1551403954745905222`; the moderator must also outrank the target. After a successful acceptance, channel `1551476206136725514` is renamed to `・xd count: N`, where `N` is the current number of members with role `1547023363900313620`. The bot needs **Manage Roles** and **Manage Channels**, with its highest role above all six assigned roles. If role assignment fails, no congratulations is sent; if all six roles are already present, it does not announce again. A count-update failure does not undo the acceptance and is reported privately to the moderator. Channel and DM delivery statuses are also reported privately. Successful role assignments are logged to channel `1551391992699682956`, including the member, moderator, roles added, optional scores, and notification results. Keep that channel staff-only and give the bot View Channel and Send Messages there. A log failure does not undo assigned roles; the moderator sees a warning. No new environment variable is required.
 
+`/jail member:@member` saves and removes the member's manageable roles, assigns jail role `1551368750488354896`, and creates member-specific channel overwrites so the member can only view and use jail channel `1551586495301681173`. `/unjail member:@member` removes the jail role, restores every saved role that still exists and remains manageable by the bot, and restores the member's previous channel-overwrite values. Both commands are available to every role that can use `/user`, require the moderator and bot to outrank the target, and refuse administrators because they bypass channel overwrites. The member receives a DM, and each action is saved to moderation history and channel `1551357755477065738`. The bot needs **Manage Roles** and **Manage Channels**. Removing the jail role manually also restores the saved roles and permissions; leaving the server cleans up the overrides.
+
 ## Staff roles
 
 The IDs in `src/policy.js` are treated as **Discord role IDs**, not individual user IDs. The bot checks these roles when the menu is opened and again when an action is submitted.
@@ -20,14 +22,14 @@ The IDs in `src/policy.js` are treated as **Discord role IDs**, not individual u
 | `1547023404157378641` | Mute, Warn, History | Yes |
 | `1551403954745905222` | None (`/tryout` and `/accept` only) | Yes |
 
-These roles do not need Discord's native moderation permissions; the **bot** needs Ban Members, Kick Members, Moderate Members, Manage Roles, and Embed Links. Moderators must still have a higher role than the target for moderation actions and `/accept`. Role `1551403954745905222` alone does not grant access to `/user`.
+These roles do not need Discord's native moderation permissions; the **bot** needs Ban Members, Kick Members, Moderate Members, Manage Roles, Manage Channels, and Embed Links. Moderators must still have a higher role than the target for moderation actions, `/accept`, and `/jail`. Role `1551403954745905222` alone does not grant access to `/user` or `/jail`.
 
 ## Setup
 
 1. Install Node.js 20+ and run `npm install` in this folder.
 2. Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications). Under **Bot → Privileged Gateway Intents**, enable **Server Members Intent** so the bot receives member-join events. Copy `.env.example` to `.env` and fill in the bot token, application/client ID, and your server ID (`1547021317193080882` for the configured welcome/verification links). Never commit or share `.env`.
 3. Invite the bot using OAuth2 scopes `bot` and `applications.commands`. Give the **bot** Ban Members, Kick Members, Moderate Members, Manage Roles, Manage Channels, and Embed Links, and put its role above members it will moderate and all six `/accept` roles. It also needs View Channel, Send Messages, and Embed Links in welcome channel `1547022446748508210` and in the channels where `/tryout` or `/accept` is used. The authorized staff roles must also be above their targets. Restrict commands in Server Settings → Integrations if desired; the bot enforces the role list regardless of that setting.
-4. Run `npm start`. The bot registers `/user`, `/tryout`, and `/accept` in the configured server on startup. Run `npm test` for the automated tests.
+4. Run `npm start`. The bot registers `/user`, `/tryout`, `/accept`, `/jail`, and `/unjail` in the configured server on startup. Run `npm test` for the automated tests.
 
 ## Deploy with Coolify
 

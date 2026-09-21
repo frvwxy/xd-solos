@@ -18,12 +18,18 @@ test('older moderation data gains private notes without losing history', async (
     store.loadState();
     assert.equal(store.getHistory('guild', 'user')[0].action, 'warn');
     assert.deepEqual(store.getNotes('guild', 'user'), []);
+    assert.equal(store.getJail('guild', 'user'), null);
 
     store.addNote({ guildId: 'guild', targetId: 'user', authorId: 'mod', text: 'Private note' });
+    store.setJail({ guildId: 'guild', targetId: 'user', moderatorId: 'mod', snapshots: [] });
+    assert.equal(store.getJail('guild', 'user').moderatorId, 'mod');
+    store.removeJail('guild', 'user');
+    assert.equal(store.getJail('guild', 'user'), null);
     assert.equal(store.getNotes('guild', 'user')[0].text, 'Private note');
     const saved = JSON.parse(readFileSync('data/moderation.json', 'utf8'));
     assert.equal(saved.history.length, 1);
     assert.equal(saved.notes.length, 1);
+    assert.deepEqual(saved.jails, []);
   } finally {
     process.chdir(originalDirectory);
     rmSync(testDirectory, { recursive: true, force: true });

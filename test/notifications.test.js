@@ -28,3 +28,15 @@ test('DM notification formats timed durations and handles servers without icons'
   assert.equal(card.components[0].type, ComponentType.TextDisplay);
   assert.match(card.components[2].content, /\*\*Duration:\*\* 1 Day/);
 });
+
+test('jail DM explains that the member was jailed', () => {
+  const card = notificationMessage(guild, moderator, 'jail', 'Restricted to the jail channel', null).components[0].toJSON();
+  assert.match(card.components[0].components[0].content, /\*\*Jailed\*\*/);
+  assert.match(card.components[0].components[0].content, /jailed in \*\*Example Server\*\*/);
+});
+
+test('unjail DM explains that the member was released', () => {
+  const card = notificationMessage(guild, moderator, 'unjail', 'Released from jail', null).components[0].toJSON();
+  assert.match(card.components[0].components[0].content, /Released from Jail/);
+  assert.match(card.components[0].components[0].content, /released from jail in \*\*Example Server\*\*/);
+});

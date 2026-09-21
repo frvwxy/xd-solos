@@ -9,6 +9,8 @@ const noticeText = {
   kick: { title: 'Kicked', verb: 'kicked' },
   warn: { title: 'Warned', verb: 'warned' },
   unban: { title: 'Unbanned', verb: 'unbanned' },
+  jail: { title: 'Jailed', verb: 'jailed' },
+  unjail: { title: 'Released from Jail', verb: 'released from jail' },
 };
 
 export function notificationMessage(guild, moderator, action, reason, duration) {
