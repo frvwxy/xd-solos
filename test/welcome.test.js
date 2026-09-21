@@ -17,6 +17,8 @@ test('welcome embed has server icon and Verify link', () => {
   assert.equal(embed.title, 'Welcome to Example Server!');
   assert.equal(embed.thumbnail.url, guild.iconURL());
   assert.match(embed.description, /new\\_member/);
+  assert.match(embed.description, /━━━━━━━━━━━━━━━━\n\*be comp\. be xd\.\*/);
+  assert.match(embed.description, /verification channel/);
   assert.equal(button.label, 'Verify');
   assert.equal(button.style, ButtonStyle.Link);
   assert.equal(button.url, VERIFY_URL);

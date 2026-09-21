@@ -7,7 +7,14 @@ export function welcomeMessage(member) {
   const card = new EmbedBuilder()
     .setColor(0x8bd8f7)
     .setTitle(`Welcome to ${member.guild.name}!`)
-    .setDescription(`Glad you're here, **${escapeMarkdown(member.user.username)}**. Press **Verify** below to get started.`)
+    .setDescription([
+      `Hey **${escapeMarkdown(member.user.username)}**, glad you're here!`,
+      '',
+      'Press **Verify** below to head to the verification channel and get started.',
+      '',
+      '━━━━━━━━━━━━━━━━',
+      '*be comp. be xd.*',
+    ].join('\n'))
     .setTimestamp();
   const icon = member.guild.iconURL({ size: 256 });
   if (icon) card.setThumbnail(icon);
