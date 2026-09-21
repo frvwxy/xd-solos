@@ -6,24 +6,27 @@ The card uses two compact button rows and explains a disabled Unban button. A me
 
 `/tryout user:@member` sends that server member a light-blue DM saying their xd tryout is starting, asking them to go to the leash area, and providing a **Join Private Server** link button. It also posts the same embed and button in the channel where the command was run, pinging only the selected user. Everyone who can view that channel can see and use the private-server link. It is available to the same staff roles as `/user`. A private confirmation reports whether the channel post and DM each succeeded; one is still attempted if the other fails. The bot needs View Channel, Send Messages, Embed Links, and Mention Everyone is **not** required in the command channel.
 
+`/accept user:@member` assigns roles `1551356027973148802`, `1551356053168459867`, `1551356073334804531`, `1551356086076969010`, and `1547023363900313620`, then posts a congratulations embed in the command channel with a ping for that member and sends them a DM. It is available only to roles `1547023404157378641`, `1547023304219697152`, `1547023959118192680`, and `1550346816351113356`; the moderator must also outrank the target. The bot needs **Manage Roles**, with its highest role above all five assigned roles. If role assignment fails, no congratulations is sent; if all five roles are already present, it does not announce again. Channel and DM delivery statuses are reported privately to the moderator. Successful role assignments are logged to channel `1551391992699682956`, including the member, moderator, roles added, and notification results. Keep that channel staff-only and give the bot View Channel, Send Messages, and Embed Links there. A log failure does not undo assigned roles; the moderator sees a warning. No new environment variable is required.
+
 ## Staff roles
 
 The IDs in `src/policy.js` are treated as **Discord role IDs**, not individual user IDs. The bot checks these roles when the menu is opened and again when an action is submitted.
 
-| Role ID(s) | Available menu options |
-| --- | --- |
-| `1547023959118192680`, `635280852741390348`, `1550346816351113356` | Ban, Temp Ban, Mute, Kick, Warn, Unban, History |
-| `1547023304219697152` | Temp Ban, Mute, Kick, Warn, History |
-| `1547023404157378641` | Mute, warn, history |
+| Role ID(s) | Available `/user` options | `/accept` |
+| --- | --- | --- |
+| `1547023959118192680`, `1550346816351113356` | Ban, Temp Ban, Mute, Kick, Warn, Unban, History | Yes |
+| `635280852741390348` | Ban, Temp Ban, Mute, Kick, Warn, Unban, History | No |
+| `1547023304219697152` | Temp Ban, Mute, Kick, Warn, History | Yes |
+| `1547023404157378641` | Mute, Warn, History | Yes |
 
-These roles do not need Discord's native moderation permissions; the **bot** needs Ban Members, Kick Members, Moderate Members, and Embed Links. Moderators must still have a higher role than the target for moderation actions. Members with none of the listed roles cannot use `/user` or `/tryout`.
+These roles do not need Discord's native moderation permissions; the **bot** needs Ban Members, Kick Members, Moderate Members, Manage Roles, and Embed Links. Moderators must still have a higher role than the target for moderation actions and `/accept`. Members with none of the listed roles cannot use `/user` or `/tryout`.
 
 ## Setup
 
 1. Install Node.js 20+ and run `npm install` in this folder.
 2. Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications). Under **Bot → Privileged Gateway Intents**, enable **Server Members Intent** so the bot receives member-join events. Copy `.env.example` to `.env` and fill in the bot token, application/client ID, and your server ID (`1547021317193080882` for the configured welcome/verification links). Never commit or share `.env`.
-3. Invite the bot using OAuth2 scopes `bot` and `applications.commands`. Give the **bot** Ban Members, Kick Members, Moderate Members, and Embed Links, and put its role above members it will moderate. It also needs View Channel, Send Messages, and Embed Links in welcome channel `1547022446748508210`. The authorized staff roles must also be above their targets. Restrict `/user` in Server Settings → Integrations if desired; the bot enforces the role list regardless of that setting.
-4. Run `npm start`. The bot registers `/user` and `/tryout` in the configured server on startup. Run `npm test` for the automated tests.
+3. Invite the bot using OAuth2 scopes `bot` and `applications.commands`. Give the **bot** Ban Members, Kick Members, Moderate Members, Manage Roles, and Embed Links, and put its role above members it will moderate and all five `/accept` roles. It also needs View Channel, Send Messages, and Embed Links in welcome channel `1547022446748508210` and in the channels where `/tryout` or `/accept` is used. The authorized staff roles must also be above their targets. Restrict commands in Server Settings → Integrations if desired; the bot enforces the role list regardless of that setting.
+4. Run `npm start`. The bot registers `/user`, `/tryout`, and `/accept` in the configured server on startup. Run `npm test` for the automated tests.
 
 ## Deploy with Coolify
 

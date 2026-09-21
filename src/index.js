@@ -11,6 +11,8 @@ import { notificationEmbed } from './notifications.js';
 import { postModLog } from './modlogs.js';
 import { postWelcome } from './welcome.js';
 import { deliverTryout, tryoutCommand } from './tryout.js';
+import { acceptCommand, canUseAccept, deliverAcceptance, grantAcceptanceRoles } from './accept.js';
+import { postAcceptanceLog } from './acceptlogs.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import { addHistory, addNote, getHistory, getNotes, getState, loadState, saveState } from './store.js';
 
@@ -269,6 +271,40 @@ async function handleTryout(interaction) {
   return reply(interaction, `Tryout for ${escapeMarkdown(user.username)}: channel post ${result.channelSent ? 'sent' : 'failed'}; DM ${result.dmSent ? 'sent' : 'failed'}.`);
 }
 
+async function handleAccept(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const actor = await interaction.guild.members.fetch(interaction.user.id);
+  if (!canUseAccept(actor.roles.cache.keys())) {
+    return reply(interaction, 'Your roles do not allow use of /accept.');
+  }
+  const user = interaction.options.getUser('user');
+  if (!user || user.bot) return reply(interaction, 'Choose a server member, not a bot.');
+  const member = await interaction.guild.members.fetch({ user: user.id, force: true }).catch(() => null);
+  if (!member) return reply(interaction, 'That user is not in this server. No roles or announcement were sent.');
+  if (!canActOn(actor, member, interaction.guild)) return reply(interaction, 'Role hierarchy prevents you from accepting this member.');
+
+  const bot = await interaction.guild.members.fetchMe();
+  let addedRoleIds;
+  try {
+    const result = await grantAcceptanceRoles(member, bot, actor.id);
+    if (!result.added) return reply(interaction, `${escapeMarkdown(user.username)} already has all acceptance roles. No duplicate announcement was sent.`);
+    addedRoleIds = result.addedRoleIds;
+  } catch (error) {
+    console.error(`Could not accept ${user.id}:`, error);
+    return reply(interaction, `Could not assign the acceptance roles to ${escapeMarkdown(user.username)}. ${error.message}`);
+  }
+
+  const channel = interaction.channel ?? await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
+  const result = await deliverAcceptance(member, channel);
+  if (result.dmError) console.warn(`Could not send acceptance DM to ${user.id}:`, result.dmError);
+  if (result.channelError) console.warn(`Could not post acceptance in ${interaction.channelId}:`, result.channelError);
+  const logSent = await postAcceptanceLog(interaction.guild, {
+    targetId: user.id, moderatorId: actor.id, addedRoleIds,
+    channelSent: result.channelSent, dmSent: result.dmSent,
+  });
+  return reply(interaction, `${escapeMarkdown(user.username)} received the acceptance roles. Channel announcement ${result.channelSent ? 'sent' : 'failed'}; DM ${result.dmSent ? 'sent' : 'failed'}.${logSent ? '' : ' Warning: acceptance log could not be posted.'}`);
+}
+
 function getPending(interaction, nonce) {
   return getPendingCard(pending, nonce, interaction.user.id, interaction.guildId);
 }
@@ -486,6 +522,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.inGuild() || !interaction.guild) return;
     if (interaction.isChatInputCommand() && interaction.commandName === 'user') await handleCommand(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'tryout') await handleTryout(interaction);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'accept') await handleAccept(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:view:')) await handleNavigation(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:submit:')) await handleSubmit(interaction);
@@ -511,7 +548,7 @@ client.once(Events.ClientReady, () => {
 
 // POST upserts each guild command without deleting any other commands in the server.
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-for (const guildCommand of [command, tryoutCommand]) {
+for (const guildCommand of [command, tryoutCommand, acceptCommand]) {
   await rest.post(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: guildCommand.toJSON() });
 }
 await client.login(DISCORD_TOKEN);
