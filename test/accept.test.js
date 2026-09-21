@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { ApplicationCommandOptionType, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import {
   ACCEPT_COMMAND_ROLE_IDS, ACCEPT_ROLE_IDS, acceptCommand, acceptanceChannelMessage, acceptanceMessage,
   canUseAccept, deliverAcceptance, grantAcceptanceRoles,
@@ -25,11 +25,18 @@ function roleSetup({ held = [], manageRoles = true, hierarchy = true, missingRol
   return { member, bot, calls };
 }
 
-test('/accept requires a user option and contains the exact six assigned role IDs', () => {
+test('/accept requires a user and offers an optional non-negative score count', () => {
   const command = acceptCommand.toJSON();
   assert.equal(command.name, 'accept');
   assert.equal(command.options[0].name, 'user');
   assert.equal(command.options[0].required, true);
+  assert.equal(command.options[1].name, 'score_count');
+  assert.equal(command.options[1].type, ApplicationCommandOptionType.Integer);
+  assert.equal(command.options[1].required, false);
+  assert.equal(command.options[1].min_value, 0);
+});
+
+test('/accept contains the exact six assigned role IDs', () => {
   assert.deepEqual(ACCEPT_ROLE_IDS, [
     '1551356027973148802', '1551356053168459867',
     '1551356073334804531', '1551356086076969010',
@@ -61,6 +68,16 @@ test('acceptance cards keep the tagline beside the icon without a divider and ch
   assert.deepEqual(dm.allowedMentions, { parse: [] });
   assert.equal(post.components[0].toJSON().content, '<@123456789012345678>');
   assert.deepEqual(post.allowedMentions, { parse: [], users: ['123456789012345678'] });
+});
+
+test('acceptance announcement displays score count only when provided', () => {
+  const scored = acceptanceChannelMessage(guild, '123456789012345678', 17);
+  const scoredContent = scored.components[1].toJSON().components[0].components[0].content;
+  assert.match(scoredContent, /\*\*Score Count:\*\* 17/);
+
+  const unscored = acceptanceMessage(guild);
+  const unscoredContent = unscored.components[0].toJSON().components[0].components[0].content;
+  assert.doesNotMatch(unscoredContent, /Score Count/);
 });
 
 test('role grant adds only missing acceptance roles with an audit reason', async () => {
@@ -102,14 +119,29 @@ test('missing permission, missing roles, or role hierarchy prevent assignment', 
   }
 });
 
-test('DM and channel announcement are attempted independently', async () => {
+test('score count is delivered to the DM and channel announcement', async () => {
   let posted;
+  let directMessage;
+  const member = {
+    id: '123456789012345678', guild,
+    send: async message => { directMessage = message; },
+  };
+  const result = await deliverAcceptance(member, { send: async message => { posted = message; } }, 8);
+  assert.equal(result.dmSent, true);
+  assert.equal(result.channelSent, true);
+  assert.equal(posted.components[0].toJSON().content, `<@${member.id}>`);
+  assert.match(posted.components[1].toJSON().components[0].components[0].content, /Score Count:\*\* 8/);
+  assert.match(directMessage.components[0].toJSON().components[0].components[0].content, /Score Count:\*\* 8/);
+});
+
+test('channel announcement is still attempted when the acceptance DM fails', async () => {
+  let posted = false;
   const member = {
     id: '123456789012345678', guild,
     send: async () => { throw new Error('DMs closed'); },
   };
-  const result = await deliverAcceptance(member, { send: async message => { posted = message; } });
+  const result = await deliverAcceptance(member, { send: async () => { posted = true; } });
   assert.equal(result.dmSent, false);
   assert.equal(result.channelSent, true);
-  assert.equal(posted.components[0].toJSON().content, `<@${member.id}>`);
+  assert.equal(posted, true);
 });

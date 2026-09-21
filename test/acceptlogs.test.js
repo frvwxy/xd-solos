@@ -13,6 +13,7 @@ const event = {
   addedRoleIds: ['1551356027973148802', '1551356053168459867'],
   channelSent: true,
   dmSent: false,
+  scoreCount: 17,
 };
 
 test('acceptance log records member, moderator, roles, and delivery results', () => {
@@ -26,8 +27,14 @@ test('acceptance log records member, moderator, roles, and delivery results', ()
   assert.equal(card.components[1].type, ComponentType.Separator);
   assert.equal(card.components[1].divider, true);
   assert.match(card.components[2].content, /<@&1551356027973148802>, <@&1551356053168459867>/);
+  assert.match(card.components[2].content, /\*\*Score Count:\*\* 17/);
   assert.match(card.components[2].content, /\*\*Channel announcement:\*\* Sent/);
   assert.match(card.components[2].content, /\*\*DM:\*\* Could not be delivered/);
+});
+
+test('acceptance log omits score count when the option was not supplied', () => {
+  const message = acceptanceLogMessage(guild, { ...event, scoreCount: null });
+  assert.doesNotMatch(message.components[0].toJSON().components[2].content, /Score Count/);
 });
 
 test('acceptance log posts to its dedicated channel without pinging', async () => {

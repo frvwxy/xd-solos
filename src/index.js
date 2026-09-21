@@ -282,6 +282,7 @@ async function handleAccept(interaction) {
     return reply(interaction, 'Your roles do not allow use of /accept.');
   }
   const user = interaction.options.getUser('user');
+  const scoreCount = interaction.options.getInteger('score_count');
   if (!user || user.bot) return reply(interaction, 'Choose a server member, not a bot.');
   const member = await interaction.guild.members.fetch({ user: user.id, force: true }).catch(() => null);
   if (!member) return reply(interaction, 'That user is not in this server. No roles or announcement were sent.');
@@ -299,7 +300,7 @@ async function handleAccept(interaction) {
   }
 
   const channel = interaction.channel ?? await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
-  const result = await deliverAcceptance(member, channel);
+  const result = await deliverAcceptance(member, channel, scoreCount);
   if (result.dmError) console.warn(`Could not send acceptance DM to ${user.id}:`, result.dmError);
   if (result.channelError) console.warn(`Could not post acceptance in ${interaction.channelId}:`, result.channelError);
   let memberCount = null;
@@ -312,7 +313,7 @@ async function handleAccept(interaction) {
   }
   const logSent = await postAcceptanceLog(interaction.guild, {
     targetId: user.id, moderatorId: actor.id, addedRoleIds,
-    channelSent: result.channelSent, dmSent: result.dmSent,
+    channelSent: result.channelSent, dmSent: result.dmSent, scoreCount,
   });
   return reply(interaction, `${escapeMarkdown(user.username)} received the acceptance roles. Channel announcement ${result.channelSent ? 'sent' : 'failed'}; DM ${result.dmSent ? 'sent' : 'failed'}.${countUpdated ? ` Member count updated to ${memberCount}.` : ' Warning: member count channel could not be updated.'}${logSent ? '' : ' Warning: acceptance log could not be posted.'}`);
 }
