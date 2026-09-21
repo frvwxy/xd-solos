@@ -9,6 +9,7 @@ import { accessLevel, canPerform, unbanUnavailableReason, visibleActions } from 
 import { actionButtons } from './buttons.js';
 import { notificationEmbed } from './notifications.js';
 import { postModLog } from './modlogs.js';
+import { postWelcome } from './welcome.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import { addHistory, addNote, getHistory, getNotes, getState, loadState, saveState } from './store.js';
 
@@ -28,7 +29,7 @@ const actions = {
 };
 const buttonLabels = { ban: 'Ban', tempban: 'Temp Ban', mute: 'Mute', kick: 'Kick', warn: 'Warn', unban: 'Unban', history: 'History' };
 const pending = new Map();
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
 const CARD_COLOR = 0x8bd8f7;
 
 const command = new SlashCommandBuilder()
@@ -474,6 +475,10 @@ client.on(Events.InteractionCreate, async interaction => {
     console.error('Interaction failed:', error);
     if (interaction.isRepliable()) await reply(interaction, 'Something went wrong. Check the bot console.').catch(console.error);
   }
+});
+
+client.on(Events.GuildMemberAdd, member => {
+  if (member.guild.id === GUILD_ID && !member.user.bot) void postWelcome(member);
 });
 
 client.once(Events.ClientReady, () => {
