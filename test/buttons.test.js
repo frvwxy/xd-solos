@@ -8,7 +8,7 @@ test('shows every grey button and disables actions unavailable to a limited role
   const available = visibleActions('limited', { canModerate: true });
   const rows = actionButtons('test', available).map(row => row.toJSON());
   const buttons = rows.flatMap(row => row.components);
-  assert.deepEqual(rows.map(row => row.components.length), [3, 3, 1]);
+  assert.deepEqual(rows.map(row => row.components.length), [3, 4]);
   assert.deepEqual(buttons.map(button => button.label), ['Ban', 'Temp Ban', 'Mute', 'Kick', 'Warn', 'Unban', 'History']);
   assert.ok(buttons.every(button => button.style === ButtonStyle.Secondary));
   assert.deepEqual(buttons.map(button => button.disabled), [true, true, false, true, false, true, false]);

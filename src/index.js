@@ -5,7 +5,7 @@ import {
   SectionBuilder, SeparatorBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle, ThumbnailBuilder, escapeMarkdown,
 } from 'discord.js';
 import { MAX_BAN, MAX_TIMEOUT, formatDuration, parseDuration } from './duration.js';
-import { accessLevel, canPerform, visibleActions } from './policy.js';
+import { accessLevel, canPerform, unbanUnavailableReason, visibleActions } from './policy.js';
 import { actionButtons } from './buttons.js';
 import { notificationEmbed } from './notifications.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
@@ -71,7 +71,7 @@ async function fetchBan(guild, targetId) {
   });
 }
 
-function profileCard(guildId, targetId, target, ban, user, nonce, available) {
+function profileCard(guildId, targetId, target, ban, user, nonce, available, unbanReason) {
   const status = target ? 'In server' : ban ? 'Banned' : 'Not in server';
   const avatar = user?.displayAvatarURL({ size: 256 });
   const created = user?.createdTimestamp ? Math.floor(user.createdTimestamp / 1000) : null;
@@ -80,15 +80,17 @@ function profileCard(guildId, targetId, target, ban, user, nonce, available) {
   const warningCount = getState().history.filter(entry => entry.guildId === guildId && entry.targetId === targetId && entry.action === 'warn').length;
   const statusText = timeout && timeout > Date.now() ? `Timed out until <t:${Math.floor(timeout / 1000)}:f>` : status;
   const topRole = target && target.roles.highest.id !== target.guild.id ? escapeMarkdown(target.roles.highest.name) : 'None';
+  const warningLabel = `${warningCount} warning${warningCount === 1 ? '' : 's'}`;
   const identity = new TextDisplayBuilder().setContent([
     `**${escapeMarkdown(target?.displayName ?? user?.username ?? 'Unknown user')}**`,
     `${user ? `@${escapeMarkdown(user.username)}` : 'Unknown account'} • ID: \`${targetId}\``,
+    `${statusText} • ${warningLabel}`,
+    `Top role: ${topRole}`,
   ].join('\n'));
   const details = new TextDisplayBuilder().setContent([
-    `**Server status:** ${statusText}`,
-    `**Top role:** ${topRole} • **Warnings:** ${warningCount}`,
-    `**Account created:** ${created ? `<t:${created}:D> (<t:${created}:R>)` : 'Unknown'}`,
-    `**Joined server:** ${joined ? `<t:${joined}:D> (<t:${joined}:R>)` : 'Not currently a member'}`,
+    `**Created:** ${created ? `<t:${created}:D> (<t:${created}:R>)` : 'Unknown'}`,
+    `**Joined:** ${joined ? `<t:${joined}:D> (<t:${joined}:R>)` : 'Not currently a member'}`,
+    ...(unbanReason ? [`-# Unban unavailable: ${unbanReason}`] : []),
   ].join('\n'));
   const card = new ContainerBuilder().setAccentColor(CARD_COLOR);
   if (avatar) {
@@ -214,21 +216,27 @@ async function handleCommand(interaction) {
   const level = accessLevel(actor.roles.cache.keys());
   if (level === 'none') return reply(interaction, 'Your roles do not allow use of this moderation command.');
   let ban = null;
-  if (!target && bot.permissions.has(PermissionFlagsBits.BanMembers)) {
+  let banCheckFailed = false;
+  const canCheckBans = bot.permissions.has(PermissionFlagsBits.BanMembers);
+  if (!target && canCheckBans) {
     try {
       ban = await fetchBan(interaction.guild, targetId);
     } catch (error) {
+      banCheckFailed = true;
       console.warn(`Could not check ban status for ${targetId}:`, error);
     }
   }
   const user = target?.user ?? ban?.user ?? await client.users.fetch(targetId).catch(() => null);
   const canModerate = target && canActOn(actor, target, interaction.guild);
   const options = visibleActions(level, { canModerate: Boolean(canModerate), banned: Boolean(ban) });
+  const unbanReason = unbanUnavailableReason(level, {
+    inServer: Boolean(target), banned: Boolean(ban), canCheckBans, banCheckFailed,
+  });
 
   const nonce = randomUUID();
   pending.set(nonce, {
     actorId: actor.id, targetId, guildId: interaction.guildId,
-    available: options, profile: profileCard(interaction.guildId, targetId, target, ban, user, nonce, options),
+    available: options, profile: profileCard(interaction.guildId, targetId, target, ban, user, nonce, options, unbanReason),
     forms: new Map(), busy: false,
     expiresAt: Date.now() + CARD_IDLE_MS,
   });

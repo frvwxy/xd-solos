@@ -29,3 +29,12 @@ export function visibleActions(level, { canModerate = false, banned = false } = 
     return canModerate;
   });
 }
+
+export function unbanUnavailableReason(level, { inServer, banned, canCheckBans, banCheckFailed = false }) {
+  if (level !== 'full') return 'a full-access staff role is required.';
+  if (inServer) return 'this user is not banned.';
+  if (!canCheckBans) return 'the bot needs Ban Members permission.';
+  if (banCheckFailed) return 'the bot could not verify the ban status.';
+  if (!banned) return 'this user is not banned.';
+  return null;
+}

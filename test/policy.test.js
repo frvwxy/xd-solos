@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { accessLevel, allowedActions, canPerform, visibleActions } from '../src/policy.js';
+import { accessLevel, allowedActions, canPerform, unbanUnavailableReason, visibleActions } from '../src/policy.js';
 
 test('full roles may use every action, including permanent ban and unban', () => {
   for (const id of ['1547023959118192680', '635280852741390348', '1550346816351113356']) {
@@ -39,4 +39,12 @@ test('card buttons reflect membership, ban status, and role tier', () => {
   assert.deepEqual(visibleActions('timed', { banned: true }), ['history']);
   assert.deepEqual(visibleActions('limited', { canModerate: true }), ['mute', 'warn', 'history']);
   assert.deepEqual(visibleActions('full'), ['history']);
+});
+
+test('unban explains status separately from staff permissions', () => {
+  assert.equal(unbanUnavailableReason('full', { inServer: true, banned: false, canCheckBans: true }), 'this user is not banned.');
+  assert.equal(unbanUnavailableReason('timed', { inServer: false, banned: true, canCheckBans: true }), 'a full-access staff role is required.');
+  assert.equal(unbanUnavailableReason('full', { inServer: false, banned: false, canCheckBans: false }), 'the bot needs Ban Members permission.');
+  assert.equal(unbanUnavailableReason('full', { inServer: false, banned: false, canCheckBans: true, banCheckFailed: true }), 'the bot could not verify the ban status.');
+  assert.equal(unbanUnavailableReason('full', { inServer: false, banned: true, canCheckBans: true }), null);
 });
