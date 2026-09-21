@@ -25,7 +25,7 @@ function roleSetup({ held = [], manageRoles = true, hierarchy = true, missingRol
   return { member, bot, calls };
 }
 
-test('/accept requires a user option and contains the exact five assigned role IDs', () => {
+test('/accept requires a user option and contains the exact six assigned role IDs', () => {
   const command = acceptCommand.toJSON();
   assert.equal(command.name, 'accept');
   assert.equal(command.options[0].name, 'user');
@@ -33,7 +33,7 @@ test('/accept requires a user option and contains the exact five assigned role I
   assert.deepEqual(ACCEPT_ROLE_IDS, [
     '1551356027973148802', '1551356053168459867',
     '1551356073334804531', '1551356086076969010',
-    '1547023363900313620',
+    '1547023363900313620', '1551398064621887528',
   ]);
 });
 
@@ -70,12 +70,20 @@ test('role grant adds only missing acceptance roles with an audit reason', async
   assert.match(calls[0].reason, /moderator-id/);
 });
 
-test('a member with the original four roles receives the additional role', async () => {
+test('a member with the original four roles receives later additions', async () => {
   const { member, bot, calls } = roleSetup({ held: ACCEPT_ROLE_IDS.slice(0, 4) });
   assert.deepEqual(await grantAcceptanceRoles(member, bot, 'moderator-id'), {
-    added: true, addedRoleIds: ['1547023363900313620'],
+    added: true, addedRoleIds: ['1547023363900313620', '1551398064621887528'],
   });
-  assert.deepEqual(calls[0].ids, ['1547023363900313620']);
+  assert.deepEqual(calls[0].ids, ['1547023363900313620', '1551398064621887528']);
+});
+
+test('a member with the first five roles receives the new sixth role', async () => {
+  const { member, bot, calls } = roleSetup({ held: ACCEPT_ROLE_IDS.slice(0, 5) });
+  assert.deepEqual(await grantAcceptanceRoles(member, bot, 'moderator-id'), {
+    added: true, addedRoleIds: ['1551398064621887528'],
+  });
+  assert.deepEqual(calls[0].ids, ['1551398064621887528']);
 });
 
 test('already accepted members do not get another role update', async () => {
