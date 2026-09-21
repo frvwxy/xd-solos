@@ -1,4 +1,5 @@
-import { EmbedBuilder, InteractionContextType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { InteractionContextType, PermissionFlagsBits, SlashCommandBuilder, TextDisplayBuilder } from 'discord.js';
+import { addDivider, cardMessage, cardWithHeader } from './cards.js';
 
 export const ACCEPT_ROLE_IDS = [
   '1551356027973148802',
@@ -26,23 +27,20 @@ export const acceptCommand = new SlashCommandBuilder()
   .setContexts(InteractionContextType.Guild)
   .addUserOption(option => option.setName('user').setDescription('Member to accept').setRequired(true));
 
+function acceptanceCard(guild) {
+  const card = cardWithHeader(guild,
+    "**Congratulations and welcome to xd!**\nYou've been accepted. We're glad to have you with us!",
+    0x8bd8f7);
+  addDivider(card);
+  return card.addTextDisplayComponents(new TextDisplayBuilder().setContent('*be comp. be xd.*'));
+}
+
 export function acceptanceMessage(guild) {
-  const embed = new EmbedBuilder()
-    .setColor(0x8bd8f7)
-    .setTitle('Congratulations and welcome to xd!')
-    .setDescription("You've been accepted. We're glad to have you with us!")
-    .setTimestamp();
-  const icon = guild.iconURL({ size: 256 });
-  if (icon) embed.setThumbnail(icon);
-  return { embeds: [embed], allowedMentions: { parse: [] } };
+  return cardMessage(acceptanceCard(guild));
 }
 
 export function acceptanceChannelMessage(guild, userId) {
-  return {
-    ...acceptanceMessage(guild),
-    content: `<@${userId}>`,
-    allowedMentions: { parse: [], users: [userId] },
-  };
+  return cardMessage(acceptanceCard(guild), userId);
 }
 
 export async function grantAcceptanceRoles(member, bot, moderatorId) {

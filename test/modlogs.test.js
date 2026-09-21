@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_MOD_LOG_CHANNEL_ID, modLogEmbed, postModLog } from '../src/modlogs.js';
+import { ComponentType, MessageFlags } from 'discord.js';
+import { DEFAULT_MOD_LOG_CHANNEL_ID, modLogMessage, postModLog } from '../src/modlogs.js';
 
 const event = {
   targetId: '123456789012345678', moderatorId: '987654321098765432',
@@ -9,16 +10,18 @@ const event = {
 
 test('mod log includes the target, moderator, reason, duration, and DM result', () => {
   const guild = { iconURL: () => 'https://cdn.discordapp.com/icons/1/icon.png' };
-  const card = modLogEmbed(guild, event).toJSON();
-  assert.equal(card.title, 'Mute');
-  assert.equal(card.thumbnail.url, guild.iconURL());
-  assert.deepEqual(card.fields.map(field => [field.name, field.value]), [
-    ['User', '<@123456789012345678> (`123456789012345678`)'],
-    ['Moderator', '<@987654321098765432> (`987654321098765432`)'],
-    ['Reason', 'Spam'],
-    ['DM', 'Delivered'],
-    ['Duration', '5 Minutes'],
-  ]);
+  const message = modLogMessage(guild, event);
+  const card = message.components[0].toJSON();
+  assert.equal(message.flags, MessageFlags.IsComponentsV2);
+  assert.equal(card.components[0].accessory.media.url, guild.iconURL());
+  assert.match(card.components[0].components[0].content, /\*\*Mute\*\*/);
+  assert.match(card.components[0].components[0].content, /<@123456789012345678>/);
+  assert.match(card.components[0].components[0].content, /<@987654321098765432>/);
+  assert.equal(card.components[1].type, ComponentType.Separator);
+  assert.equal(card.components[1].divider, true);
+  assert.match(card.components[2].content, /\*\*Reason:\*\* Spam/);
+  assert.match(card.components[2].content, /\*\*Duration:\*\* 5 Minutes/);
+  assert.match(card.components[2].content, /\*\*DM:\*\* Delivered/);
 });
 
 test('posts to the configured channel without pinging users', async () => {
@@ -33,14 +36,15 @@ test('posts to the configured channel without pinging users', async () => {
   assert.equal(await postModLog(guild, event, DEFAULT_MOD_LOG_CHANNEL_ID), true);
   assert.equal(messages.length, 1);
   assert.deepEqual(messages[0].allowedMentions, { parse: [] });
-  assert.equal(messages[0].embeds[0].toJSON().title, 'Mute');
+  assert.equal(messages[0].flags, MessageFlags.IsComponentsV2);
+  assert.match(messages[0].components[0].toJSON().components[0].content, /\*\*Mute\*\*/);
 });
 
 test('automatic unban log identifies the timer', () => {
-  const card = modLogEmbed({ iconURL: () => null }, {
+  const card = modLogMessage({ iconURL: () => null }, {
     targetId: event.targetId, moderatorId: null, action: 'unban',
     reason: 'Timed ban expired', duration: null, dmSent: null,
-  }).toJSON();
-  assert.equal(card.fields[1].value, 'Automatic timer');
-  assert.equal(card.fields[3].value, 'Not attempted');
+  }).components[0].toJSON();
+  assert.match(card.components[0].content, /Automatic timer/);
+  assert.match(card.components[2].content, /\*\*DM:\*\* Not attempted/);
 });

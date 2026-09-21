@@ -7,7 +7,7 @@ import {
 import { MAX_BAN, MAX_TIMEOUT, formatDuration, parseDuration } from './duration.js';
 import { accessLevel, canPerform, unbanUnavailableReason, visibleActions } from './policy.js';
 import { actionButtons } from './buttons.js';
-import { notificationEmbed } from './notifications.js';
+import { notificationMessage } from './notifications.js';
 import { postModLog } from './modlogs.js';
 import { postWelcome } from './welcome.js';
 import { deliverTryout, tryoutCommand } from './tryout.js';
@@ -129,6 +129,7 @@ function panelPayload(nonce, item, view) {
   }
   if (view === 'records') {
     const card = panel('User records', subtitle, 'What would you like to open?');
+    card.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
     card.addActionRowComponents(...panelButtons(nonce, [['notes', '📝 Notes'], ['history', '📁 Moderation History'], ['backprofile', 'Back']]));
     return { components: [card] };
   }
@@ -142,11 +143,13 @@ function panelPayload(nonce, item, view) {
       return `• <t:${when}:f> — ${buttonLabels[entry.action] ?? entry.action}${duration} — ${reason} — by ${entry.moderatorId ?? 'bot'}`;
     });
     const card = panel('Moderation History', `${subtitle} • ${total} record(s)`, lines.join('\n') || 'No moderation history was found for this user.');
+    card.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
     card.addActionRowComponents(...panelButtons(nonce, [['backrecords', 'Back']]));
     return { components: [card] };
   }
   if (view === 'notes') {
     const card = panel('Notes', subtitle, 'Add a private moderator note or review existing notes.');
+    card.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
     card.addActionRowComponents(...panelButtons(nonce, [['addnote', 'Add Note'], ['viewnotes', 'View Notes'], ['backrecords', 'Back']]));
     return { components: [card] };
   }
@@ -157,6 +160,7 @@ function panelPayload(nonce, item, view) {
     return `• <t:${when}:f> — ${note.text.replace(/\s+/g, ' ').slice(0, 250)} — by ${note.authorId}`;
   });
   const card = panel('Private Notes', `${subtitle} • ${total} note(s)`, lines.join('\n') || 'No notes were found for this user.');
+  card.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
   card.addActionRowComponents(...panelButtons(nonce, [['backnotes', 'Back']]));
   return { components: [card] };
 }
@@ -173,8 +177,7 @@ function saveHistorySafely(entry) {
 
 async function notify(target, guild, moderator, action, reason, duration) {
   try {
-    const card = notificationEmbed(guild, moderator, action, reason, duration);
-    await target.send({ embeds: [card], allowedMentions: { parse: [] } });
+    await target.send(notificationMessage(guild, moderator, action, reason, duration));
     return true;
   } catch (error) {
     console.warn(`Could not DM ${target.id}:`, error);

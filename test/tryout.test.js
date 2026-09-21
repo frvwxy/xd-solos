@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ButtonStyle } from 'discord.js';
+import { ButtonStyle, ComponentType, MessageFlags } from 'discord.js';
 import { TRYOUT_SERVER_URL, deliverTryout, tryoutChannelMessage, tryoutCommand, tryoutMessage } from '../src/tryout.js';
 
 const guild = {
@@ -14,13 +14,16 @@ test('/tryout requires a user option', () => {
   assert.equal(command.options[0].required, true);
 });
 
-test('tryout DM includes the instructions and private-server link', () => {
+test('tryout DM has a divider before its private-server button', () => {
   const message = tryoutMessage(guild);
-  const embed = message.embeds[0].toJSON();
-  const button = message.components[0].components[0].toJSON();
-  assert.match(embed.title, /tryout for xd is starting now/);
-  assert.match(embed.description, /leash area/);
-  assert.equal(embed.thumbnail.url, guild.iconURL());
+  const card = message.components[0].toJSON();
+  const button = card.components[2].components[0];
+  assert.equal(message.flags, MessageFlags.IsComponentsV2);
+  assert.match(card.components[0].components[0].content, /tryout for xd is starting now/);
+  assert.match(card.components[0].components[0].content, /leash area/);
+  assert.equal(card.components[0].accessory.media.url, guild.iconURL());
+  assert.equal(card.components[1].type, ComponentType.Separator);
+  assert.equal(card.components[1].divider, true);
   assert.equal(button.style, ButtonStyle.Link);
   assert.equal(button.label, 'Join Private Server');
   assert.equal(button.url, TRYOUT_SERVER_URL);
@@ -29,9 +32,9 @@ test('tryout DM includes the instructions and private-server link', () => {
 
 test('channel post pings only the selected member', () => {
   const message = tryoutChannelMessage(guild, '123456789012345678');
-  assert.equal(message.content, '<@123456789012345678>');
+  assert.equal(message.components[0].toJSON().content, '<@123456789012345678>');
   assert.deepEqual(message.allowedMentions, { parse: [], users: ['123456789012345678'] });
-  assert.equal(message.components[0].components[0].toJSON().url, TRYOUT_SERVER_URL);
+  assert.equal(message.components[1].toJSON().components[2].components[0].url, TRYOUT_SERVER_URL);
 });
 
 test('DM and channel post are both attempted even if one fails', async () => {
@@ -46,7 +49,7 @@ test('DM and channel post are both attempted even if one fails', async () => {
   assert.equal(dmAttempted, true);
   assert.equal(result.dmSent, false);
   assert.equal(result.channelSent, true);
-  assert.equal(channelMessage.content, `<@${member.id}>`);
+  assert.equal(channelMessage.components[0].toJSON().content, `<@${member.id}>`);
 });
 
 test('DM still sends if the command channel cannot accept messages', async () => {
@@ -58,5 +61,5 @@ test('DM still sends if the command channel cannot accept messages', async () =>
   const result = await deliverTryout(member, null);
   assert.equal(result.dmSent, true);
   assert.equal(result.channelSent, false);
-  assert.equal(dmMessage.components[0].components[0].toJSON().url, TRYOUT_SERVER_URL);
+  assert.equal(dmMessage.components[0].toJSON().components[2].components[0].url, TRYOUT_SERVER_URL);
 });

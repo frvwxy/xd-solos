@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PermissionFlagsBits } from 'discord.js';
+import { ComponentType, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import {
   ACCEPT_COMMAND_ROLE_IDS, ACCEPT_ROLE_IDS, acceptCommand, acceptanceChannelMessage, acceptanceMessage,
   canUseAccept, deliverAcceptance, grantAcceptanceRoles,
@@ -48,13 +48,18 @@ test('/accept is available to exactly the four requested staff roles', () => {
   assert.equal(canUseAccept(['123', ACCEPT_COMMAND_ROLE_IDS[0]]), true);
 });
 
-test('acceptance embeds include the server icon and channel post pings only the selected user', () => {
+test('acceptance cards include a divider and channel post pings only the selected user', () => {
   const dm = acceptanceMessage(guild);
   const post = acceptanceChannelMessage(guild, '123456789012345678');
-  assert.equal(dm.embeds[0].toJSON().title, 'Congratulations and welcome to xd!');
-  assert.equal(dm.embeds[0].toJSON().thumbnail.url, guild.iconURL());
+  const card = dm.components[0].toJSON();
+  assert.equal(dm.flags, MessageFlags.IsComponentsV2);
+  assert.match(card.components[0].components[0].content, /Congratulations and welcome to xd/);
+  assert.equal(card.components[0].accessory.media.url, guild.iconURL());
+  assert.equal(card.components[1].type, ComponentType.Separator);
+  assert.equal(card.components[1].divider, true);
+  assert.equal(card.components[2].content, '*be comp. be xd.*');
   assert.deepEqual(dm.allowedMentions, { parse: [] });
-  assert.equal(post.content, '<@123456789012345678>');
+  assert.equal(post.components[0].toJSON().content, '<@123456789012345678>');
   assert.deepEqual(post.allowedMentions, { parse: [], users: ['123456789012345678'] });
 });
 
@@ -98,5 +103,5 @@ test('DM and channel announcement are attempted independently', async () => {
   const result = await deliverAcceptance(member, { send: async message => { posted = message; } });
   assert.equal(result.dmSent, false);
   assert.equal(result.channelSent, true);
-  assert.equal(posted.content, `<@${member.id}>`);
+  assert.equal(posted.components[0].toJSON().content, `<@${member.id}>`);
 });

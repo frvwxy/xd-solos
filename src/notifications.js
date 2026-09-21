@@ -1,4 +1,5 @@
-import { EmbedBuilder, escapeMarkdown } from 'discord.js';
+import { TextDisplayBuilder, escapeMarkdown } from 'discord.js';
+import { addDivider, cardMessage, cardWithHeader } from './cards.js';
 import { formatDuration } from './duration.js';
 
 const noticeText = {
@@ -10,21 +11,18 @@ const noticeText = {
   unban: { title: 'Unbanned', verb: 'unbanned' },
 };
 
-export function notificationEmbed(guild, moderator, action, reason, duration) {
+export function notificationMessage(guild, moderator, action, reason, duration) {
   const notice = noticeText[action];
   if (!notice) throw new Error(`Unknown moderation action: ${action}`);
-  const icon = guild.iconURL({ size: 256 });
   const name = moderator.displayName ?? moderator.user?.username ?? 'Server staff';
-  const card = new EmbedBuilder()
-    .setColor(0xfacc15)
-    .setTitle(notice.title)
-    .setDescription(`You have been ${notice.verb} in **${escapeMarkdown(guild.name)}**.`)
-    .addFields(
-      { name: 'Moderator', value: escapeMarkdown(name), inline: true },
-      { name: 'Reason', value: reason, inline: true },
-    )
-    .setTimestamp();
-  if (duration) card.addFields({ name: 'Duration', value: formatDuration(duration), inline: true });
-  if (icon) card.setThumbnail(icon);
-  return card;
+  const card = cardWithHeader(guild,
+    `**${notice.title}**\nYou have been ${notice.verb} in **${escapeMarkdown(guild.name)}**.`,
+    0xfacc15);
+  addDivider(card);
+  card.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `**Moderator:** ${escapeMarkdown(name)}`,
+    `**Reason:** ${escapeMarkdown(reason)}`,
+    ...(duration ? [`**Duration:** ${formatDuration(duration)}`] : []),
+  ].join('\n')));
+  return cardMessage(card);
 }

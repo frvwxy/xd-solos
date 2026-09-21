@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ACCEPT_LOG_CHANNEL_ID, acceptanceLogEmbed, postAcceptanceLog } from '../src/acceptlogs.js';
+import { ComponentType, MessageFlags } from 'discord.js';
+import { ACCEPT_LOG_CHANNEL_ID, acceptanceLogMessage, postAcceptanceLog } from '../src/acceptlogs.js';
 
 const guild = {
   id: '1547021317193080882',
@@ -15,16 +16,18 @@ const event = {
 };
 
 test('acceptance log records member, moderator, roles, and delivery results', () => {
-  const embed = acceptanceLogEmbed(guild, event).toJSON();
-  assert.equal(embed.title, 'Member Accepted into xd');
-  assert.equal(embed.thumbnail.url, guild.iconURL());
-  assert.deepEqual(embed.fields.map(field => [field.name, field.value]), [
-    ['Member', '<@123456789012345678> (`123456789012345678`)'],
-    ['Accepted by', '<@234567890123456789> (`234567890123456789`)'],
-    ['Roles added', '<@&1551356027973148802>, <@&1551356053168459867>'],
-    ['Channel announcement', 'Sent'],
-    ['DM', 'Could not be delivered'],
-  ]);
+  const message = acceptanceLogMessage(guild, event);
+  const card = message.components[0].toJSON();
+  assert.equal(message.flags, MessageFlags.IsComponentsV2);
+  assert.equal(card.components[0].accessory.media.url, guild.iconURL());
+  assert.match(card.components[0].components[0].content, /Member Accepted into xd/);
+  assert.match(card.components[0].components[0].content, /<@123456789012345678>/);
+  assert.match(card.components[0].components[0].content, /<@234567890123456789>/);
+  assert.equal(card.components[1].type, ComponentType.Separator);
+  assert.equal(card.components[1].divider, true);
+  assert.match(card.components[2].content, /<@&1551356027973148802>, <@&1551356053168459867>/);
+  assert.match(card.components[2].content, /\*\*Channel announcement:\*\* Sent/);
+  assert.match(card.components[2].content, /\*\*DM:\*\* Could not be delivered/);
 });
 
 test('acceptance log posts to its dedicated channel without pinging', async () => {
@@ -38,5 +41,6 @@ test('acceptance log posts to its dedicated channel without pinging', async () =
   assert.equal(await postAcceptanceLog(targetGuild, event), true);
   assert.equal(fetched, ACCEPT_LOG_CHANNEL_ID);
   assert.deepEqual(sent.allowedMentions, { parse: [] });
-  assert.equal(sent.embeds[0].toJSON().title, 'Member Accepted into xd');
+  assert.equal(sent.flags, MessageFlags.IsComponentsV2);
+  assert.match(sent.components[0].toJSON().components[0].components[0].content, /Member Accepted into xd/);
 });
