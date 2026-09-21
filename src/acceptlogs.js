@@ -4,7 +4,7 @@ import { addDivider, cardMessage, cardWithHeader } from './cards.js';
 export const ACCEPT_LOG_CHANNEL_ID = '1551391992699682956';
 
 export function acceptanceLogMessage(guild, {
-  targetId, moderatorId, addedRoleIds, channelSent, dmSent, scoreCount = null,
+  targetId, moderatorId, addedRoleIds, channelSent, dmSent, scores = null,
 }) {
   const card = cardWithHeader(guild, [
     '**Member Accepted into xd**',
@@ -13,7 +13,10 @@ export function acceptanceLogMessage(guild, {
   ].join('\n'), 0x8bd8f7, 128);
   addDivider(card);
   card.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    ...(scoreCount === null ? [] : [`**Score Count:** ${scoreCount}`]),
+    ...(scores?.staffScore === null || scores?.staffScore === undefined
+      ? [] : [`**Staff Score:** ${scores.staffScore}`]),
+    ...(scores?.memberScore === null || scores?.memberScore === undefined
+      ? [] : [`**Member Score:** ${scores.memberScore}`]),
     `**Roles added:** ${addedRoleIds.map(id => `<@&${id}>`).join(', ')}`,
     `**Channel announcement:** ${channelSent ? 'Sent' : 'Failed'}`,
     `**DM:** ${dmSent ? 'Delivered' : 'Could not be delivered'}`,

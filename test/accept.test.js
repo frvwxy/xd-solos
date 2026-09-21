@@ -25,15 +25,21 @@ function roleSetup({ held = [], manageRoles = true, hierarchy = true, missingRol
   return { member, bot, calls };
 }
 
-test('/accept requires a user and offers an optional non-negative score count', () => {
+test('/accept requires a user and offers unrestricted optional integer scores', () => {
   const command = acceptCommand.toJSON();
   assert.equal(command.name, 'accept');
   assert.equal(command.options[0].name, 'user');
   assert.equal(command.options[0].required, true);
-  assert.equal(command.options[1].name, 'score_count');
+  assert.equal(command.options[1].name, 'staff_score');
   assert.equal(command.options[1].type, ApplicationCommandOptionType.Integer);
   assert.equal(command.options[1].required, false);
-  assert.equal(command.options[1].min_value, 0);
+  assert.equal(command.options[1].min_value, undefined);
+  assert.equal(command.options[1].max_value, undefined);
+  assert.equal(command.options[2].name, 'member_score');
+  assert.equal(command.options[2].type, ApplicationCommandOptionType.Integer);
+  assert.equal(command.options[2].required, false);
+  assert.equal(command.options[2].min_value, undefined);
+  assert.equal(command.options[2].max_value, undefined);
 });
 
 test('/accept contains the exact six assigned role IDs', () => {
@@ -70,14 +76,20 @@ test('acceptance cards keep the tagline beside the icon without a divider and ch
   assert.deepEqual(post.allowedMentions, { parse: [], users: ['123456789012345678'] });
 });
 
-test('acceptance announcement displays score count only when provided', () => {
-  const scored = acceptanceChannelMessage(guild, '123456789012345678', 17);
+test('acceptance announcement displays the score inputs without range or total validation', () => {
+  const scored = acceptanceChannelMessage(guild, '123456789012345678', { staffScore: 12, memberScore: -4 });
   const scoredContent = scored.components[1].toJSON().components[0].components[0].content;
-  assert.match(scoredContent, /\*\*Score Count:\*\* 17/);
+  assert.match(scoredContent, /\*\*Staff Score:\*\* 12/);
+  assert.match(scoredContent, /\*\*Member Score:\*\* -4/);
+
+  const partial = acceptanceMessage(guild, { staffScore: null, memberScore: 9 });
+  const partialContent = partial.components[0].toJSON().components[0].components[0].content;
+  assert.doesNotMatch(partialContent, /Staff Score/);
+  assert.match(partialContent, /\*\*Member Score:\*\* 9/);
 
   const unscored = acceptanceMessage(guild);
   const unscoredContent = unscored.components[0].toJSON().components[0].components[0].content;
-  assert.doesNotMatch(unscoredContent, /Score Count/);
+  assert.doesNotMatch(unscoredContent, /Staff Score|Member Score/);
 });
 
 test('role grant adds only missing acceptance roles with an audit reason', async () => {
@@ -119,19 +131,23 @@ test('missing permission, missing roles, or role hierarchy prevent assignment', 
   }
 });
 
-test('score count is delivered to the DM and channel announcement', async () => {
+test('staff and member scores are delivered to the DM and channel announcement', async () => {
   let posted;
   let directMessage;
   const member = {
     id: '123456789012345678', guild,
     send: async message => { directMessage = message; },
   };
-  const result = await deliverAcceptance(member, { send: async message => { posted = message; } }, 8);
+  const result = await deliverAcceptance(member, { send: async message => { posted = message; } }, {
+    staffScore: 1, memberScore: 2,
+  });
   assert.equal(result.dmSent, true);
   assert.equal(result.channelSent, true);
   assert.equal(posted.components[0].toJSON().content, `<@${member.id}>`);
-  assert.match(posted.components[1].toJSON().components[0].components[0].content, /Score Count:\*\* 8/);
-  assert.match(directMessage.components[0].toJSON().components[0].components[0].content, /Score Count:\*\* 8/);
+  assert.match(posted.components[1].toJSON().components[0].components[0].content, /Staff Score:\*\* 1/);
+  assert.match(posted.components[1].toJSON().components[0].components[0].content, /Member Score:\*\* 2/);
+  assert.match(directMessage.components[0].toJSON().components[0].components[0].content, /Staff Score:\*\* 1/);
+  assert.match(directMessage.components[0].toJSON().components[0].components[0].content, /Member Score:\*\* 2/);
 });
 
 test('channel announcement is still attempted when the acceptance DM fails', async () => {

@@ -29,23 +29,29 @@ export const acceptCommand = new SlashCommandBuilder()
   .setContexts(InteractionContextType.Guild)
   .addUserOption(option => option.setName('user').setDescription('Member to accept').setRequired(true))
   .addIntegerOption(option => option
-    .setName('score_count')
-    .setDescription('Optional score count to include in the announcement and log')
-    .setMinValue(0));
+    .setName('staff_score')
+    .setDescription('Staff score to include in the announcement and log'))
+  .addIntegerOption(option => option
+    .setName('member_score')
+    .setDescription('Member score to include in the announcement and log'));
 
-function acceptanceCard(guild, scoreCount = null) {
-  const score = scoreCount === null ? '' : `\n**Score Count:** ${scoreCount}`;
+function acceptanceCard(guild, scores = null) {
+  const scoreLines = scores === null ? [] : [
+    ...(scores.staffScore === null ? [] : [`**Staff Score:** ${scores.staffScore}`]),
+    ...(scores.memberScore === null ? [] : [`**Member Score:** ${scores.memberScore}`]),
+  ];
+  const score = scoreLines.length ? `\n${scoreLines.join('\n')}` : '';
   return cardWithHeader(guild,
     `**Congratulations!**\nWelcome to xd. We're glad to have you with us.${score}\n\n*be comp. be xd.*`,
     0x8bd8f7);
 }
 
-export function acceptanceMessage(guild, scoreCount = null) {
-  return cardMessage(acceptanceCard(guild, scoreCount));
+export function acceptanceMessage(guild, scores = null) {
+  return cardMessage(acceptanceCard(guild, scores));
 }
 
-export function acceptanceChannelMessage(guild, userId, scoreCount = null) {
-  return cardMessage(acceptanceCard(guild, scoreCount), userId);
+export function acceptanceChannelMessage(guild, userId, scores = null) {
+  return cardMessage(acceptanceCard(guild, scores), userId);
 }
 
 export async function grantAcceptanceRoles(member, bot, moderatorId) {
@@ -64,12 +70,12 @@ export async function grantAcceptanceRoles(member, bot, moderatorId) {
   return { added: true, addedRoleIds: missing };
 }
 
-export async function deliverAcceptance(member, channel, scoreCount = null) {
+export async function deliverAcceptance(member, channel, scores = null) {
   const [dm, post] = await Promise.allSettled([
-    Promise.resolve().then(() => member.send(acceptanceMessage(member.guild, scoreCount))),
+    Promise.resolve().then(() => member.send(acceptanceMessage(member.guild, scores))),
     Promise.resolve().then(() => {
       if (typeof channel?.send !== 'function') throw new Error('Command channel cannot accept messages');
-      return channel.send(acceptanceChannelMessage(member.guild, member.id, scoreCount));
+      return channel.send(acceptanceChannelMessage(member.guild, member.id, scores));
     }),
   ]);
   return {
