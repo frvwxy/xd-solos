@@ -37,10 +37,11 @@ test('/accept requires a user option and contains the exact six assigned role ID
   ]);
 });
 
-test('/accept is available to exactly the four requested staff roles', () => {
+test('/accept is available to exactly the five requested staff roles', () => {
   assert.deepEqual(ACCEPT_COMMAND_ROLE_IDS, [
     '1547023404157378641', '1547023304219697152',
     '1547023959118192680', '1550346816351113356',
+    '1551403954745905222',
   ]);
   for (const id of ACCEPT_COMMAND_ROLE_IDS) assert.equal(canUseAccept([id]), true);
   assert.equal(canUseAccept(['635280852741390348']), false);

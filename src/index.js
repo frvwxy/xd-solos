@@ -10,7 +10,7 @@ import { actionButtons } from './buttons.js';
 import { notificationMessage } from './notifications.js';
 import { postModLog } from './modlogs.js';
 import { postWelcome } from './welcome.js';
-import { deliverTryout, tryoutCommand } from './tryout.js';
+import { canUseTryout, deliverTryout, tryoutCommand } from './tryout.js';
 import { acceptCommand, canUseAccept, deliverAcceptance, grantAcceptanceRoles } from './accept.js';
 import { postAcceptanceLog } from './acceptlogs.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
@@ -260,7 +260,7 @@ async function handleCommand(interaction) {
 async function handleTryout(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (accessLevel(actor.roles.cache.keys()) === 'none') {
+  if (!canUseTryout(actor.roles.cache.keys())) {
     return reply(interaction, 'Your roles do not allow use of this command.');
   }
   const user = interaction.options.getUser('user');
