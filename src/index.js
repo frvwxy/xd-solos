@@ -8,6 +8,7 @@ import { MAX_BAN, MAX_TIMEOUT, formatDuration, parseDuration } from './duration.
 import { accessLevel, canPerform, unbanUnavailableReason, visibleActions } from './policy.js';
 import { actionButtons } from './buttons.js';
 import { notificationEmbed } from './notifications.js';
+import { postModLog } from './modlogs.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import { addHistory, addNote, getHistory, getNotes, getState, loadState, saveState } from './store.js';
 
@@ -370,7 +371,8 @@ async function performAction(interaction, item, action, reason, duration, durati
       getState().timedBans = getState().timedBans.filter(entry => entry.guildId !== interaction.guildId || entry.targetId !== targetId);
       const dmSent = await notify(ban.user, interaction.guild, actor, action, reason);
       const historySaved = saveHistorySafely({ guildId: interaction.guildId, targetId, moderatorId: actor.id, action, reason, duration: null, dmSent });
-      return reply(interaction, `${ban.user.username} was unbanned. DM ${dmSent ? 'sent' : 'could not be delivered'}.${historySaved ? '' : ' Warning: history could not be saved.'}`);
+      const logSent = await postModLog(interaction.guild, { targetId, moderatorId: actor.id, action, reason, duration: null, dmSent });
+      return reply(interaction, `${ban.user.username} was unbanned. DM ${dmSent ? 'sent' : 'could not be delivered'}.${historySaved ? '' : ' Warning: history could not be saved.'}${logSent ? '' : ' Warning: moderation log could not be posted.'}`);
     } catch (error) {
       console.error('Unban failed:', error);
       return reply(interaction, 'Could not unban this user. Check my permissions and the console.');
@@ -417,8 +419,9 @@ async function performAction(interaction, item, action, reason, duration, durati
       }
     }
     const historySaved = saveHistorySafely({ guildId: interaction.guildId, targetId, moderatorId: actor.id, action, reason, duration: duration || null, dmSent });
+    const logSent = await postModLog(interaction.guild, { targetId, moderatorId: actor.id, action, reason, duration: duration || null, dmSent });
     const label = action === 'ban' ? 'permanently banned' : actions[action].verb;
-    return reply(interaction, `${target.user.username} was ${label}${duration ? ` for ${formatDuration(duration)}` : ''}. DM ${dmSent ? 'sent' : 'could not be delivered'}.${historySaved ? '' : ' Warning: history could not be saved.'}`);
+    return reply(interaction, `${target.user.username} was ${label}${duration ? ` for ${formatDuration(duration)}` : ''}. DM ${dmSent ? 'sent' : 'could not be delivered'}.${historySaved ? '' : ' Warning: history could not be saved.'}${logSent ? '' : ' Warning: moderation log could not be posted.'}`);
   } catch (error) {
     console.error(`${action} failed:`, error);
     return reply(interaction, `Could not ${action} this member. Check my permissions and the console.${dmSent ? ' A DM may already have been sent.' : ''}`);
@@ -435,13 +438,21 @@ async function checkTimedBans() {
       try {
         const guild = await client.guilds.fetch(entry.guildId);
         const ban = await fetchBan(guild, entry.targetId);
+        let unbanned = false;
         // A manual unban followed by a new ban must never be undone by the old timer.
         if (ban?.reason?.includes(`timed-ban:${entry.tag}`)) {
           await guild.bans.remove(entry.targetId, 'Timed ban expired');
           getState().history.push({ guildId: entry.guildId, targetId: entry.targetId, moderatorId: null, action: 'unban', reason: 'Timed ban expired', at: new Date().toISOString() });
+          unbanned = true;
         }
         getState().timedBans = getState().timedBans.filter(b => b !== entry);
         saveState();
+        if (unbanned) {
+          await postModLog(guild, {
+            targetId: entry.targetId, moderatorId: null, action: 'unban',
+            reason: 'Timed ban expired', duration: null, dmSent: null,
+          });
+        }
       } catch (error) {
         console.error(`Timed unban failed for ${entry.guildId}/${entry.targetId}; will retry:`, error);
       }
