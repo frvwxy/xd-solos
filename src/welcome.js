@@ -10,7 +10,7 @@ export function welcomeMessage(member) {
   const introduction = new TextDisplayBuilder().setContent([
     `**Welcome to ${escapeMarkdown(member.guild.name)}!**`,
     '',
-    `Hey **${escapeMarkdown(member.user.username)}**, glad you're here!`,
+    `Hey <@${member.id}>, glad you're here!`,
     'Click **Verify** to get started.',
   ].join('\n'));
   const card = new ContainerBuilder().setAccentColor(0x8bd8f7);
@@ -26,7 +26,11 @@ export function welcomeMessage(member) {
   const verifyButton = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setLabel('Verify').setStyle(ButtonStyle.Link).setURL(VERIFY_URL),
   );
-  return { components: [card, verifyButton], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
+  return {
+    components: [card, verifyButton],
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [], users: [member.id] },
+  };
 }
 
 export async function postWelcome(member, channelId = WELCOME_CHANNEL_ID) {

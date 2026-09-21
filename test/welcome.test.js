@@ -20,7 +20,7 @@ test('welcome card has the server icon and a Verify link below the card', () => 
   assert.equal(card.type, ComponentType.Container);
   assert.equal(section.accessory.media.url, guild.iconURL());
   assert.match(section.components[0].content, /Welcome to Example Server/);
-  assert.match(section.components[0].content, /new\\_member/);
+  assert.match(section.components[0].content, /Hey <@123>, glad you're here!/);
   assert.match(section.components[0].content, /Click \*\*Verify\*\* to get started\./);
   assert.equal(card.components[1].content, '*be comp. be xd.*');
   assert.equal(card.components.length, 2);
@@ -28,7 +28,7 @@ test('welcome card has the server icon and a Verify link below the card', () => 
   assert.equal(button.label, 'Verify');
   assert.equal(button.style, ButtonStyle.Link);
   assert.equal(button.url, VERIFY_URL);
-  assert.deepEqual(message.allowedMentions, { parse: [] });
+  assert.deepEqual(message.allowedMentions, { parse: [], users: [member.id] });
 });
 
 test('welcome card works when the server has no icon', () => {
@@ -46,5 +46,6 @@ test('welcome posts to the configured channel', async () => {
   assert.equal(await postWelcome(target), true);
   assert.equal(fetched, WELCOME_CHANNEL_ID);
   assert.equal(sent.flags, MessageFlags.IsComponentsV2);
+  assert.deepEqual(sent.allowedMentions, { parse: [], users: [member.id] });
   assert.equal(sent.components[1].toJSON().components[0].url, VERIFY_URL);
 });
