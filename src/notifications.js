@@ -23,7 +23,7 @@ export function notificationMessage(guild, moderator, action, reason, duration) 
   addDivider(card);
   card.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `**Moderator:** ${escapeMarkdown(name)}`,
-    `**Reason:** ${escapeMarkdown(reason)}`,
+    ...(reason ? [`**Reason:** ${escapeMarkdown(reason)}`] : []),
     ...(duration ? [`**Duration:** ${formatDuration(duration)}`] : []),
   ].join('\n')));
   return cardMessage(card);

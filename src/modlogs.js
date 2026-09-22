@@ -23,7 +23,7 @@ export function modLogMessage(guild, { targetId, moderatorId, action, reason, du
   ].join('\n'), 0x8bd8f7, 128);
   addDivider(card);
   card.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `**Reason:** ${escapeMarkdown(reason || 'No reason provided')}`,
+    ...(reason ? [`**Reason:** ${escapeMarkdown(reason)}`] : []),
     ...(duration ? [`**Duration:** ${formatDuration(duration)}`] : []),
     `**DM:** ${dmSent == null ? 'Not attempted' : dmSent ? 'Delivered' : 'Could not be delivered'}`,
   ].join('\n')));

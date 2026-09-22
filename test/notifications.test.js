@@ -30,9 +30,10 @@ test('DM notification formats timed durations and handles servers without icons'
 });
 
 test('jail DM explains that the member was jailed', () => {
-  const card = notificationMessage(guild, moderator, 'jail', 'Restricted to the jail channel', null).components[0].toJSON();
+  const card = notificationMessage(guild, moderator, 'jail', null, null).components[0].toJSON();
   assert.match(card.components[0].components[0].content, /\*\*Jailed\*\*/);
   assert.match(card.components[0].components[0].content, /jailed in \*\*Example Server\*\*/);
+  assert.doesNotMatch(card.components[2].content, /\*\*Reason:\*\*/);
 });
 
 test('unjail DM explains that the member was released', () => {

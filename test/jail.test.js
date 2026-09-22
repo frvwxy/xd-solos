@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PermissionFlagsBits } from 'discord.js';
 import {
-  JAIL_CHANNEL_ID, JAIL_ROLE_ID, canSetupJail, canUseJail, jailCommand, jailMember,
-  setupJailChannels, unjailCommand, unjailMember,
+  JAIL_CHANNEL_ID, JAIL_ROLE_ID, applyJailRolePermissions, canUseJail, jailCommand, jailMember,
+  unjailCommand, unjailMember,
 } from '../src/jail.js';
 
 function setup({ manageRoles = true, manageChannels = true, alreadyJailed = false } = {}) {
@@ -64,21 +64,20 @@ test('/jail requires a member and uses existing moderation staff roles', () => {
   assert.equal(command.options[0].name, 'member');
   assert.equal(command.options[0].options[0].name, 'user');
   assert.equal(command.options[0].options[0].required, true);
-  assert.equal(command.options[1].name, 'setup');
+  assert.equal(command.options[0].options[1].name, 'reason');
+  assert.equal(command.options[0].options[1].required, false);
+  assert.equal(command.options.length, 1);
   assert.equal(unjailCommand.toJSON().name, 'unjail');
   assert.equal(unjailCommand.toJSON().options[0].name, 'member');
   assert.equal(canUseJail(['1547023404157378641']), true);
   assert.equal(canUseJail(['635280852741390348']), true);
-  assert.equal(canSetupJail(['635280852741390348']), true);
-  assert.equal(canSetupJail(['1547023404157378641']), false);
   assert.equal(canUseJail(['unknown']), false);
 });
 
-test('jail setup denies the jail role elsewhere and allows it in jail', async () => {
+test('jail role permissions deny other channels and allow the jail channel', async () => {
   const setupResult = setup();
-  assert.deepEqual(await setupJailChannels(setupResult.guild, setupResult.bot), {
-    updatedCount: 2, failedCount: 0, failures: [],
-  });
+  assert.equal(await applyJailRolePermissions(setupResult.channels.get('general')), true);
+  assert.equal(await applyJailRolePermissions(setupResult.channels.get(JAIL_CHANNEL_ID)), true);
   assert.deepEqual(setupResult.overwriteCalls, [
     { id: 'general', target: JAIL_ROLE_ID, changes: { ViewChannel: false } },
     {
@@ -101,11 +100,9 @@ test('jailing removes manageable roles and assigns the shared jail role', async 
   ]);
 });
 
-test('jailing requires Manage Roles, setup requires Manage Channels, and jail is not duplicated', async () => {
+test('jailing requires Manage Roles and is not duplicated', async () => {
   const noRoles = setup({ manageRoles: false });
   await assert.rejects(jailMember(noRoles.member, noRoles.bot, 'mod'), /Manage Roles/);
-  const noChannels = setup({ manageChannels: false });
-  await assert.rejects(setupJailChannels(noChannels.guild, noChannels.bot), /Manage Channels/);
   const existing = setup({ alreadyJailed: true });
   assert.deepEqual(await jailMember(existing.member, existing.bot, 'mod'), {
     added: false, snapshots: [], removedRoleIds: [],

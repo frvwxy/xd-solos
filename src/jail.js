@@ -6,15 +6,13 @@ export const JAIL_ROLE_ID = '1551368750488354896';
 
 export const jailCommand = new SlashCommandBuilder()
   .setName('jail')
-  .setDescription('Set up jail channels or jail a member')
+  .setDescription('Jail a member')
   .setContexts(InteractionContextType.Guild)
   .addSubcommand(subcommand => subcommand
     .setName('member')
     .setDescription('Restrict a member to the jail channel')
-    .addUserOption(option => option.setName('user').setDescription('Member to jail').setRequired(true)))
-  .addSubcommand(subcommand => subcommand
-    .setName('setup')
-    .setDescription('Apply the jail role permissions to every channel'));
+    .addUserOption(option => option.setName('user').setDescription('Member to jail').setRequired(true))
+    .addStringOption(option => option.setName('reason').setDescription('Optional reason for jailing this member')));
 
 export const unjailCommand = new SlashCommandBuilder()
   .setName('unjail')
@@ -26,10 +24,6 @@ export function canUseJail(roleIds) {
   return accessLevel(roleIds) !== 'none';
 }
 
-export function canSetupJail(roleIds) {
-  return accessLevel(roleIds) === 'full';
-}
-
 export async function applyJailRolePermissions(channel) {
   if (typeof channel.permissionOverwrites?.edit !== 'function') return false;
   const permissions = channel.id === JAIL_CHANNEL_ID
@@ -37,36 +31,6 @@ export async function applyJailRolePermissions(channel) {
     : { ViewChannel: false };
   await channel.permissionOverwrites.edit(JAIL_ROLE_ID, permissions);
   return true;
-}
-
-export async function setupJailChannels(guild, bot) {
-  if (!bot.permissions.has(PermissionFlagsBits.ManageChannels)) {
-    throw new Error('The bot needs Manage Channels permission.');
-  }
-  const jailRole = await guild.roles.fetch(JAIL_ROLE_ID);
-  if (!jailRole) throw new Error(`Jail role ${JAIL_ROLE_ID} was not found in this server.`);
-  if (jailRole.managed || bot.roles.highest.comparePositionTo(jailRole) <= 0) {
-    throw new Error('The bot role must be above the jail role, and the jail role cannot be managed.');
-  }
-  const channels = await guild.channels.fetch();
-  const jailChannel = channels.get(JAIL_CHANNEL_ID);
-  if (!jailChannel?.isTextBased()) {
-    throw new Error(`Jail channel ${JAIL_CHANNEL_ID} was not found or is not text-based.`);
-  }
-
-  const editable = [...channels.values()]
-    .filter(channel => channel.guildId === guild.id && typeof channel.permissionOverwrites?.edit === 'function')
-    .sort((a, b) => Number(a.id === JAIL_CHANNEL_ID) - Number(b.id === JAIL_CHANNEL_ID));
-  let updatedCount = 0;
-  const failures = [];
-  for (const channel of editable) {
-    try {
-      if (await applyJailRolePermissions(channel)) updatedCount += 1;
-    } catch (error) {
-      failures.push({ channelId: channel.id, error });
-    }
-  }
-  return { updatedCount, failedCount: failures.length, failures };
 }
 
 const permissionBits = {

@@ -18,8 +18,8 @@ import {
   canManageChannelLock, lockChannel, lockCommand, unlockChannel, unlockCommand,
 } from './channel-lock.js';
 import {
-  JAIL_ROLE_ID, applyJailRolePermissions, canSetupJail, canUseJail, jailCommand, jailMember,
-  restoreJailAccess, setupJailChannels, unjailCommand, unjailMember,
+  JAIL_ROLE_ID, applyJailRolePermissions, canUseJail, jailCommand, jailMember,
+  restoreJailAccess, unjailCommand, unjailMember,
 } from './jail.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import {
@@ -151,8 +151,8 @@ function panelPayload(nonce, item, view) {
     const lines = entries.map(entry => {
       const when = Math.floor(new Date(entry.at).getTime() / 1000);
       const duration = entry.duration ? ` (${formatDuration(entry.duration)})` : '';
-      const reason = (entry.reason ?? 'No reason provided').replace(/\s+/g, ' ').slice(0, 80);
-      return `• <t:${when}:f> — ${buttonLabels[entry.action] ?? entry.action}${duration} — ${reason} — by ${entry.moderatorId ?? 'bot'}`;
+      const reason = entry.reason ? ` — ${entry.reason.replace(/\s+/g, ' ').slice(0, 80)}` : '';
+      return `• <t:${when}:f> — ${buttonLabels[entry.action] ?? entry.action}${duration}${reason} — by ${entry.moderatorId ?? 'bot'}`;
     });
     const card = panel('Moderation History', `${subtitle} • ${total} record(s)`, lines.join('\n') || 'No moderation history was found for this user.');
     card.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
@@ -334,24 +334,11 @@ async function handleAccept(interaction) {
 async function handleJail(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  const subcommand = interaction.options.getSubcommand();
-  if (subcommand === 'setup') {
-    if (!canSetupJail(actor.roles.cache.keys())) {
-      return reply(interaction, 'Only full-access staff roles can use /jail setup.');
-    }
-    try {
-      const bot = await interaction.guild.members.fetchMe();
-      const result = await setupJailChannels(interaction.guild, bot);
-      return reply(interaction, `Jail permissions were applied to ${result.updatedCount} channel(s).${result.failedCount ? ` ${result.failedCount} channel(s) failed; check the bot console and rerun setup.` : ''}`);
-    } catch (error) {
-      console.error('Could not set up jail channel permissions:', error);
-      return reply(interaction, `Could not set up jail permissions. ${error.message}`);
-    }
-  }
   if (!canUseJail(actor.roles.cache.keys())) {
     return reply(interaction, 'Your roles do not allow use of /jail.');
   }
   const user = interaction.options.getUser('user');
+  const reason = interaction.options.getString('reason')?.trim() || null;
   if (!user || user.bot) return reply(interaction, 'Choose a server member, not a bot.');
   const member = await interaction.guild.members.fetch({ user: user.id, force: true }).catch(() => null);
   if (!member) return reply(interaction, 'That user is not in this server.');
@@ -388,7 +375,6 @@ async function handleJail(interaction) {
     return reply(interaction, `Could not jail ${escapeMarkdown(user.username)}. ${error.message}`);
   }
 
-  const reason = 'Restricted to the jail channel';
   const dmSent = await notify(member, interaction.guild, actor, 'jail', reason, null);
   const historySaved = saveHistorySafely({
     guildId: interaction.guildId, targetId: user.id, moderatorId: actor.id,
