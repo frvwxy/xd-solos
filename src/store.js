@@ -19,9 +19,11 @@ export function loadState() {
     if (!Array.isArray(state.notes)) throw new Error('Invalid moderator notes');
     if (state.jails === undefined) state.jails = [];
     if (!Array.isArray(state.jails)) throw new Error('Invalid jail records');
+    if (state.channelLocks === undefined) state.channelLocks = [];
+    if (!Array.isArray(state.channelLocks)) throw new Error('Invalid channel lock records');
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    state = { warnings: [], timedBans: [], history: [], notes: [], jails: [] };
+    state = { warnings: [], timedBans: [], history: [], notes: [], jails: [], channelLocks: [] };
   }
   return state;
 }
@@ -76,4 +78,24 @@ export function removeJail(guildId, targetId) {
   const before = state.jails.length;
   state.jails = state.jails.filter(entry => entry.guildId !== guildId || entry.targetId !== targetId);
   if (state.jails.length !== before) saveState();
+}
+
+export function getChannelLock(guildId, channelId) {
+  return getState().channelLocks.find(entry => entry.guildId === guildId && entry.channelId === channelId) ?? null;
+}
+
+export function setChannelLock(entry) {
+  const state = getState();
+  state.channelLocks = state.channelLocks
+    .filter(item => item.guildId !== entry.guildId || item.channelId !== entry.channelId);
+  state.channelLocks.push(entry);
+  saveState();
+}
+
+export function removeChannelLock(guildId, channelId) {
+  const state = getState();
+  const before = state.channelLocks.length;
+  state.channelLocks = state.channelLocks
+    .filter(entry => entry.guildId !== guildId || entry.channelId !== channelId);
+  if (state.channelLocks.length !== before) saveState();
 }

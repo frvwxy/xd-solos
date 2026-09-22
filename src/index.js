@@ -15,11 +15,16 @@ import { acceptCommand, canUseAccept, deliverAcceptance, grantAcceptanceRoles } 
 import { postAcceptanceLog } from './acceptlogs.js';
 import { updateMemberCount } from './membercount.js';
 import {
-  JAIL_ROLE_ID, canUseJail, jailCommand, jailMember, restoreJailAccess, unjailCommand, unjailMember,
+  canManageChannelLock, lockChannel, lockCommand, unlockChannel, unlockCommand,
+} from './channel-lock.js';
+import {
+  JAIL_ROLE_ID, applyJailRolePermissions, canSetupJail, canUseJail, jailCommand, jailMember,
+  restoreJailAccess, setupJailChannels, unjailCommand, unjailMember,
 } from './jail.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import {
-  addHistory, addNote, getHistory, getJail, getNotes, getState, loadState, removeJail, saveState, setJail,
+  addHistory, addNote, getChannelLock, getHistory, getJail, getNotes, getState, loadState,
+  removeChannelLock, removeJail, saveState, setChannelLock, setJail,
 } from './store.js';
 
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
@@ -329,10 +334,24 @@ async function handleAccept(interaction) {
 async function handleJail(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
+  const subcommand = interaction.options.getSubcommand();
+  if (subcommand === 'setup') {
+    if (!canSetupJail(actor.roles.cache.keys())) {
+      return reply(interaction, 'Only full-access staff roles can use /jail setup.');
+    }
+    try {
+      const bot = await interaction.guild.members.fetchMe();
+      const result = await setupJailChannels(interaction.guild, bot);
+      return reply(interaction, `Jail permissions were applied to ${result.updatedCount} channel(s).${result.failedCount ? ` ${result.failedCount} channel(s) failed; check the bot console and rerun setup.` : ''}`);
+    } catch (error) {
+      console.error('Could not set up jail channel permissions:', error);
+      return reply(interaction, `Could not set up jail permissions. ${error.message}`);
+    }
+  }
   if (!canUseJail(actor.roles.cache.keys())) {
     return reply(interaction, 'Your roles do not allow use of /jail.');
   }
-  const user = interaction.options.getUser('member');
+  const user = interaction.options.getUser('user');
   if (!user || user.bot) return reply(interaction, 'Choose a server member, not a bot.');
   const member = await interaction.guild.members.fetch({ user: user.id, force: true }).catch(() => null);
   if (!member) return reply(interaction, 'That user is not in this server.');
@@ -421,6 +440,48 @@ async function handleUnjail(interaction) {
   const skipped = restored.skippedRoleIds.length
     ? ` ${restored.skippedRoleIds.length} saved role(s) could not be restored because they are missing, managed, or above the bot.` : '';
   return reply(interaction, `${escapeMarkdown(user.username)} was unjailed and ${restored.restoredRoleIds.length} role(s) were restored.${skipped} DM ${dmSent ? 'sent' : 'failed'}.${historySaved ? '' : ' Warning: history could not be saved.'}${logSent ? '' : ' Warning: moderation log could not be posted.'}`);
+}
+
+async function handleChannelLock(interaction, shouldLock) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const actor = await interaction.guild.members.fetch(interaction.user.id);
+  if (!canManageChannelLock(
+    actor.roles.cache.keys(), actor.permissions.has(PermissionFlagsBits.Administrator),
+  )) {
+    return reply(interaction, 'You need the channel-lock role or Administrator permission to use this command.');
+  }
+  const channel = interaction.channel
+    ?? await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
+  if (!channel) return reply(interaction, 'The current channel could not be found.');
+  const existing = getChannelLock(interaction.guildId, channel.id);
+  const bot = await interaction.guild.members.fetchMe();
+
+  if (shouldLock) {
+    if (existing) return reply(interaction, 'This channel is already locked by the bot.');
+    let previous;
+    try {
+      ({ previous } = await lockChannel(channel, interaction.guild, bot));
+      setChannelLock({
+        guildId: interaction.guildId, channelId: channel.id,
+        moderatorId: actor.id, previous, at: new Date().toISOString(),
+      });
+    } catch (error) {
+      if (previous !== undefined) await unlockChannel(channel, interaction.guild, bot, previous).catch(console.error);
+      console.error(`Could not lock channel ${channel.id}:`, error);
+      return reply(interaction, `Could not lock this channel. ${error.message}`);
+    }
+    return reply(interaction, `Locked <#${channel.id}> for the member role.`);
+  }
+
+  if (!existing) return reply(interaction, 'This channel does not have a saved bot lock.');
+  try {
+    await unlockChannel(channel, interaction.guild, bot, existing.previous);
+    removeChannelLock(interaction.guildId, channel.id);
+  } catch (error) {
+    console.error(`Could not unlock channel ${channel.id}:`, error);
+    return reply(interaction, `Could not unlock this channel. ${error.message}`);
+  }
+  return reply(interaction, `Unlocked <#${channel.id}> and restored the member role's previous permission.`);
 }
 
 function getPending(interaction, nonce) {
@@ -662,6 +723,8 @@ client.on(Events.InteractionCreate, async interaction => {
     else if (interaction.isChatInputCommand() && interaction.commandName === 'accept') await handleAccept(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'jail') await handleJail(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'unjail') await handleUnjail(interaction);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'lock') await handleChannelLock(interaction, true);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'unlock') await handleChannelLock(interaction, false);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:view:')) await handleNavigation(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:submit:')) await handleSubmit(interaction);
@@ -674,6 +737,22 @@ client.on(Events.InteractionCreate, async interaction => {
 
 client.on(Events.GuildMemberAdd, member => {
   if (member.guild.id === GUILD_ID && !member.user.bot) void postWelcome(member);
+});
+
+client.on(Events.ChannelCreate, channel => {
+  if (channel.guildId !== GUILD_ID) return;
+  void applyJailRolePermissions(channel)
+    .catch(error => console.error(`Could not apply jail permissions to new channel ${channel.id}:`, error));
+});
+
+client.on(Events.ChannelDelete, channel => {
+  if (channel.guildId === GUILD_ID && getChannelLock(channel.guildId, channel.id)) {
+    try {
+      removeChannelLock(channel.guildId, channel.id);
+    } catch (error) {
+      console.error(`Could not remove saved lock for deleted channel ${channel.id}:`, error);
+    }
+  }
 });
 
 client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
@@ -710,7 +789,9 @@ client.once(Events.ClientReady, () => {
 
 // POST upserts each guild command without deleting any other commands in the server.
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-for (const guildCommand of [command, tryoutCommand, acceptCommand, jailCommand, unjailCommand]) {
+for (const guildCommand of [
+  command, tryoutCommand, acceptCommand, jailCommand, unjailCommand, lockCommand, unlockCommand,
+]) {
   await rest.post(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: guildCommand.toJSON() });
 }
 await client.login(DISCORD_TOKEN);
