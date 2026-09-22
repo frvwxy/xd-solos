@@ -58,15 +58,14 @@ function setup({ manageRoles = true, manageChannels = true, alreadyJailed = fals
   return { bot, channels, deleteCalls, guild, member, overwriteCalls, roleCalls };
 }
 
-test('/jail requires a member and uses existing moderation staff roles', () => {
+test('/jail directly requires a user and offers an optional reason', () => {
   const command = jailCommand.toJSON();
   assert.equal(command.name, 'jail');
-  assert.equal(command.options[0].name, 'member');
-  assert.equal(command.options[0].options[0].name, 'user');
-  assert.equal(command.options[0].options[0].required, true);
-  assert.equal(command.options[0].options[1].name, 'reason');
-  assert.equal(command.options[0].options[1].required, false);
-  assert.equal(command.options.length, 1);
+  assert.equal(command.options[0].name, 'user');
+  assert.equal(command.options[0].required, true);
+  assert.equal(command.options[1].name, 'reason');
+  assert.equal(command.options[1].required, false);
+  assert.equal(command.options.length, 2);
   assert.equal(unjailCommand.toJSON().name, 'unjail');
   assert.equal(unjailCommand.toJSON().options[0].name, 'member');
   assert.equal(canUseJail(['1547023404157378641']), true);

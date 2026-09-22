@@ -8,11 +8,8 @@ export const jailCommand = new SlashCommandBuilder()
   .setName('jail')
   .setDescription('Jail a member')
   .setContexts(InteractionContextType.Guild)
-  .addSubcommand(subcommand => subcommand
-    .setName('member')
-    .setDescription('Restrict a member to the jail channel')
-    .addUserOption(option => option.setName('user').setDescription('Member to jail').setRequired(true))
-    .addStringOption(option => option.setName('reason').setDescription('Optional reason for jailing this member')));
+  .addUserOption(option => option.setName('user').setDescription('Member to jail').setRequired(true))
+  .addStringOption(option => option.setName('reason').setDescription('Optional reason for jailing this member'));
 
 export const unjailCommand = new SlashCommandBuilder()
   .setName('unjail')
