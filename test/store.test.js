@@ -20,6 +20,7 @@ test('older moderation data gains private notes without losing history', async (
     assert.deepEqual(store.getNotes('guild', 'user'), []);
     assert.equal(store.getJail('guild', 'user'), null);
     assert.equal(store.getChannelLock('guild', 'channel'), null);
+    assert.equal(store.getActiveRaid('guild'), null);
 
     store.addNote({ guildId: 'guild', targetId: 'user', authorId: 'mod', text: 'Private note' });
     store.setJail({ guildId: 'guild', targetId: 'user', moderatorId: 'mod', snapshots: [] });
@@ -29,6 +30,10 @@ test('older moderation data gains private notes without losing history', async (
     store.setChannelLock({ guildId: 'guild', channelId: 'channel', moderatorId: 'mod', previous: null });
     assert.equal(store.getChannelLock('guild', 'channel').moderatorId, 'mod');
     store.removeChannelLock('guild', 'channel');
+    store.setActiveRaid({ guildId: 'guild', opps: 'Opponents', startedAt: 123 });
+    assert.equal(store.getActiveRaid('guild').opps, 'Opponents');
+    store.removeActiveRaid('guild');
+    assert.equal(store.getActiveRaid('guild'), null);
     assert.equal(store.getChannelLock('guild', 'channel'), null);
     assert.equal(store.getNotes('guild', 'user')[0].text, 'Private note');
     const saved = JSON.parse(readFileSync('data/moderation.json', 'utf8'));
@@ -36,6 +41,7 @@ test('older moderation data gains private notes without losing history', async (
     assert.equal(saved.notes.length, 1);
     assert.deepEqual(saved.jails, []);
     assert.deepEqual(saved.channelLocks, []);
+    assert.deepEqual(saved.activeRaids, []);
   } finally {
     process.chdir(originalDirectory);
     rmSync(testDirectory, { recursive: true, force: true });

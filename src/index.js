@@ -21,10 +21,16 @@ import {
   JAIL_ROLE_ID, applyJailRolePermissions, canUseJail, jailCommand, jailMember,
   restoreJailAccess, unjailCommand, unjailMember,
 } from './jail.js';
+import {
+  RAID_ANNOUNCEMENT_CHANNEL_ID, RAID_LOCK_CHANNEL_ID, activeRaidChannelMessage,
+  canUseRaid, endedRaidAnnouncementMessage, getRobloxJoinInfo, raidAnnouncementMessage,
+  raidCommand, raidEndMessage, resolveRobloxUser,
+} from './raid.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import {
-  addHistory, addNote, getChannelLock, getHistory, getJail, getNotes, getState, loadState,
-  removeChannelLock, removeJail, saveState, setChannelLock, setJail,
+  addHistory, addNote, getActiveRaid, getChannelLock, getHistory, getJail, getNotes, getState,
+  loadState, removeActiveRaid, removeChannelLock, removeJail, saveState, setActiveRaid,
+  setChannelLock, setJail,
 } from './store.js';
 
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
@@ -44,6 +50,7 @@ const actions = {
 const buttonLabels = { ban: 'Ban', tempban: 'Temp Ban', mute: 'Mute', kick: 'Kick', warn: 'Warn', unban: 'Unban', jail: 'Jail', unjail: 'Unjail', history: 'History' };
 const pending = new Map();
 const activeUnjails = new Set();
+const activeRaidOperations = new Set();
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
 const CARD_COLOR = 0x8bd8f7;
 
@@ -470,6 +477,161 @@ async function handleChannelLock(interaction, shouldLock) {
   return reply(interaction, `Unlocked <#${channel.id}> and restored the member role's previous permission.`);
 }
 
+async function fetchTextChannel(guild, channelId, label) {
+  const channel = await guild.channels.fetch(channelId).catch(() => null);
+  if (!channel?.isTextBased() || typeof channel.send !== 'function') {
+    throw new Error(`${label} channel ${channelId} was not found or cannot receive messages.`);
+  }
+  return channel;
+}
+
+async function startRaid(interaction, actor) {
+  if (getActiveRaid(interaction.guildId)) return reply(interaction, 'A raid is already active. End it before starting another.');
+  if (getChannelLock(interaction.guildId, RAID_LOCK_CHANNEL_ID)) {
+    return reply(interaction, 'The configured raid channel is already locked by the bot. Unlock it before starting a raid.');
+  }
+
+  const username = interaction.options.getString('roblox_user', true).trim();
+  const opps = interaction.options.getString('opps', true).trim();
+  if (!opps) return reply(interaction, 'Enter at least one opponent name.');
+  let robloxUser;
+  try {
+    robloxUser = await resolveRobloxUser(username);
+  } catch (error) {
+    console.error(`Could not resolve Roblox user ${username}:`, error);
+    return reply(interaction, `Could not find that Roblox user. ${error.message}`);
+  }
+
+  let joinInfo = { status: 'Joins unavailable', joinUrl: null, placeId: null, gameInstanceId: null };
+  try {
+    joinInfo = await getRobloxJoinInfo(robloxUser.id);
+  } catch (error) {
+    console.warn(`Could not check Roblox presence for ${robloxUser.id}:`, error);
+  }
+
+  let lockChannelTarget;
+  let announcementChannel;
+  try {
+    [lockChannelTarget, announcementChannel] = await Promise.all([
+      fetchTextChannel(interaction.guild, RAID_LOCK_CHANNEL_ID, 'Raid lock'),
+      fetchTextChannel(interaction.guild, RAID_ANNOUNCEMENT_CHANNEL_ID, 'Raid announcement'),
+    ]);
+  } catch (error) {
+    return reply(interaction, error.message);
+  }
+
+  const bot = await interaction.guild.members.fetchMe();
+  const startedAt = Date.now();
+  const raid = {
+    guildId: interaction.guildId,
+    lockChannelId: RAID_LOCK_CHANNEL_ID,
+    announcementChannelId: RAID_ANNOUNCEMENT_CHANNEL_ID,
+    startedBy: actor.id,
+    startedAt,
+    opps,
+    robloxUserId: robloxUser.id,
+    robloxUsername: robloxUser.name,
+    robloxDisplayName: robloxUser.displayName,
+    robloxProfileUrl: robloxUser.profileUrl,
+    robloxStatus: joinInfo.status,
+    joinUrl: joinInfo.joinUrl,
+  };
+
+  let previous;
+  let markerMessage;
+  let announcementMessage;
+  try {
+    ({ previous } = await lockChannel(lockChannelTarget, interaction.guild, bot));
+    raid.previous = previous;
+    setChannelLock({
+      guildId: interaction.guildId, channelId: RAID_LOCK_CHANNEL_ID,
+      moderatorId: actor.id, previous, source: 'raid', at: new Date(startedAt).toISOString(),
+    });
+    markerMessage = await lockChannelTarget.send(activeRaidChannelMessage());
+    announcementMessage = await announcementChannel.send(raidAnnouncementMessage(interaction.guild, raid));
+    raid.markerMessageId = markerMessage.id;
+    raid.announcementMessageId = announcementMessage.id;
+    setActiveRaid(raid);
+  } catch (error) {
+    await announcementMessage?.delete().catch(console.error);
+    await markerMessage?.delete().catch(console.error);
+    if (previous !== undefined) {
+      await unlockChannel(lockChannelTarget, interaction.guild, bot, previous).catch(console.error);
+      try { removeChannelLock(interaction.guildId, RAID_LOCK_CHANNEL_ID); } catch (saveError) { console.error(saveError); }
+    }
+    try { removeActiveRaid(interaction.guildId); } catch (saveError) { console.error(saveError); }
+    console.error('Could not start raid:', error);
+    return reply(interaction, `Could not start the raid. ${error.message}`);
+  }
+
+  const joinStatus = raid.joinUrl ? 'A Roblox join button was added.' : `Roblox status: ${raid.robloxStatus}.`;
+  return reply(interaction, `Raid started against ${escapeMarkdown(opps)}. <#${RAID_LOCK_CHANNEL_ID}> is locked and the announcement was posted in <#${RAID_ANNOUNCEMENT_CHANNEL_ID}>. ${joinStatus}`);
+}
+
+async function endRaid(interaction, actor) {
+  const raid = getActiveRaid(interaction.guildId);
+  if (!raid) return reply(interaction, 'There is no active raid to end.');
+  const result = interaction.options.getString('result', true);
+  let lockChannelTarget;
+  try {
+    lockChannelTarget = await fetchTextChannel(interaction.guild, raid.lockChannelId, 'Raid lock');
+    const bot = await interaction.guild.members.fetchMe();
+    await unlockChannel(lockChannelTarget, interaction.guild, bot, raid.previous);
+    if (getChannelLock(interaction.guildId, raid.lockChannelId)) {
+      removeChannelLock(interaction.guildId, raid.lockChannelId);
+    }
+    removeActiveRaid(interaction.guildId);
+  } catch (error) {
+    console.error('Could not end raid:', error);
+    return reply(interaction, `Could not end the raid or restore the channel permission. ${error.message}`);
+  }
+
+  const endedAt = Date.now();
+  const announcementChannel = await fetchTextChannel(
+    interaction.guild, raid.announcementChannelId, 'Raid announcement',
+  ).catch(error => {
+    console.error('Could not find the raid announcement channel while ending the raid:', error);
+    return null;
+  });
+  const updates = await Promise.allSettled([
+    Promise.resolve().then(async () => {
+      if (!raid.markerMessageId) return;
+      const message = await lockChannelTarget.messages.fetch(raid.markerMessageId);
+      await message.delete();
+    }),
+    Promise.resolve().then(async () => {
+      if (!announcementChannel) throw new Error('Raid announcement channel is unavailable.');
+      if (!raid.announcementMessageId) return;
+      const message = await announcementChannel.messages.fetch(raid.announcementMessageId);
+      await message.edit(endedRaidAnnouncementMessage(interaction.guild, raid, result, actor.id, endedAt));
+    }),
+    Promise.resolve().then(() => {
+      if (!announcementChannel) throw new Error('Raid announcement channel is unavailable.');
+      return announcementChannel.send(raidEndMessage(interaction.guild, raid, result, actor.id, endedAt));
+    }),
+  ]);
+  const failedUpdates = updates.filter(item => item.status === 'rejected');
+  for (const item of failedUpdates) console.error('Could not update a raid message:', item.reason);
+  return reply(interaction, `Raid ended as ${result === 'won' ? 'a win' : 'a loss'} and <#${raid.lockChannelId}> was unlocked.${failedUpdates.length ? ` ${failedUpdates.length} raid message update(s) failed; check the bot console.` : ''}`);
+}
+
+async function handleRaid(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const actor = await interaction.guild.members.fetch(interaction.user.id);
+  if (!canUseRaid(actor.roles.cache.keys(), actor.permissions.has(PermissionFlagsBits.Administrator))) {
+    return reply(interaction, 'You need the raid staff role or Administrator permission to use this command.');
+  }
+  if (activeRaidOperations.has(interaction.guildId)) return reply(interaction, 'Another raid action is already in progress.');
+  activeRaidOperations.add(interaction.guildId);
+  try {
+    return interaction.options.getSubcommand() === 'start'
+      ? await startRaid(interaction, actor)
+      : await endRaid(interaction, actor);
+  } finally {
+    activeRaidOperations.delete(interaction.guildId);
+  }
+}
+
 function getPending(interaction, nonce) {
   return getPendingCard(pending, nonce, interaction.user.id, interaction.guildId);
 }
@@ -711,6 +873,7 @@ client.on(Events.InteractionCreate, async interaction => {
     else if (interaction.isChatInputCommand() && interaction.commandName === 'unjail') await handleUnjail(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'lock') await handleChannelLock(interaction, true);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'unlock') await handleChannelLock(interaction, false);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'raid') await handleRaid(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:view:')) await handleNavigation(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:submit:')) await handleSubmit(interaction);
@@ -776,7 +939,7 @@ client.once(Events.ClientReady, () => {
 // POST upserts each guild command without deleting any other commands in the server.
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 for (const guildCommand of [
-  command, tryoutCommand, acceptCommand, jailCommand, unjailCommand, lockCommand, unlockCommand,
+  command, tryoutCommand, acceptCommand, jailCommand, unjailCommand, lockCommand, unlockCommand, raidCommand,
 ]) {
   await rest.post(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: guildCommand.toJSON() });
 }

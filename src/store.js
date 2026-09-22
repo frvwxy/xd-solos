@@ -21,9 +21,11 @@ export function loadState() {
     if (!Array.isArray(state.jails)) throw new Error('Invalid jail records');
     if (state.channelLocks === undefined) state.channelLocks = [];
     if (!Array.isArray(state.channelLocks)) throw new Error('Invalid channel lock records');
+    if (state.activeRaids === undefined) state.activeRaids = [];
+    if (!Array.isArray(state.activeRaids)) throw new Error('Invalid active raid records');
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    state = { warnings: [], timedBans: [], history: [], notes: [], jails: [], channelLocks: [] };
+    state = { warnings: [], timedBans: [], history: [], notes: [], jails: [], channelLocks: [], activeRaids: [] };
   }
   return state;
 }
@@ -98,4 +100,22 @@ export function removeChannelLock(guildId, channelId) {
   state.channelLocks = state.channelLocks
     .filter(entry => entry.guildId !== guildId || entry.channelId !== channelId);
   if (state.channelLocks.length !== before) saveState();
+}
+
+export function getActiveRaid(guildId) {
+  return getState().activeRaids.find(entry => entry.guildId === guildId) ?? null;
+}
+
+export function setActiveRaid(entry) {
+  const state = getState();
+  state.activeRaids = state.activeRaids.filter(item => item.guildId !== entry.guildId);
+  state.activeRaids.push(entry);
+  saveState();
+}
+
+export function removeActiveRaid(guildId) {
+  const state = getState();
+  const before = state.activeRaids.length;
+  state.activeRaids = state.activeRaids.filter(entry => entry.guildId !== guildId);
+  if (state.activeRaids.length !== before) saveState();
 }

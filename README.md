@@ -12,6 +12,10 @@ Jail role `1551368750488354896` is denied **View Channel** everywhere except jai
 
 `/lock` denies **Send Messages** for member role `1547023363900313620` in the channel where the command is run. `/unlock` restores that role's exact previous Send Messages overwrite (`allow`, `deny`, or inherited). Both commands can be used by members with role `1547023404157378641` or Discord's **Administrator** permission, and require the bot to have **Manage Channels** with its role above the member role. Lock state is persisted across restarts and removed automatically if the channel is deleted.
 
+`/raid start roblox_user:<username> opps:<names>` starts the server's single active raid. It is available to role `1547023404157378641` and administrators. The command resolves the Roblox username, checks whether the user exposes a joinable game, locks channel `1547135508054806589`, and posts the configured active-raid heading there. It then pings role `1551356053168459867` with a light-blue raid embed in channel `1547135372167749692`. The embed shows the Roblox account, opponents, staff member, and a live Discord timestamp; a **Join on Roblox** button is included only when Roblox returns a public place and game instance. If the user is offline or their joins are unavailable, the raid still starts without a join button.
+
+`/raid end result:<won|lost>` restores the locked channel's exact previous Send Messages permission, removes the active-raid heading, marks the original announcement as ended, calculates the elapsed time, and posts the result in the raid channel while pinging log role `1551356073334804531`. Only one raid can run at a time. Active raid state is stored in `data/moderation.json`, so the timer and unlock information survive a restart. No Roblox cookie, API key, or new environment variable is required. The bot needs outbound HTTPS access plus **Manage Channels**, View Channel, Send Messages, Embed Links, and permission to mention the two configured roles (or those roles must be mentionable).
+
 ## Staff roles
 
 The IDs in `src/policy.js` are treated as **Discord role IDs**, not individual user IDs. The bot checks these roles when the menu is opened and again when an action is submitted.
@@ -31,7 +35,7 @@ These roles do not need Discord's native moderation permissions; the **bot** nee
 1. Install Node.js 20+ and run `npm install` in this folder.
 2. Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications). Under **Bot → Privileged Gateway Intents**, enable **Server Members Intent** so the bot receives member-join events. Copy `.env.example` to `.env` and fill in the bot token, application/client ID, and your server ID (`1547021317193080882` for the configured welcome/verification links). Never commit or share `.env`.
 3. Invite the bot using OAuth2 scopes `bot` and `applications.commands`. Give the **bot** Ban Members, Kick Members, Moderate Members, Manage Roles, Manage Channels, and Embed Links, and put its role above members it will moderate and all six `/accept` roles. It also needs View Channel, Send Messages, and Embed Links in welcome channel `1547022446748508210` and in the channels where `/tryout` or `/accept` is used. The authorized staff roles must also be above their targets. Restrict commands in Server Settings → Integrations if desired; the bot enforces the role list regardless of that setting.
-4. Run `npm start`. The bot registers `/user`, `/tryout`, `/accept`, `/jail`, `/unjail`, `/lock`, and `/unlock` in the configured server on startup. Run `npm test` for the automated tests.
+4. Run `npm start`. The bot registers `/user`, `/tryout`, `/accept`, `/jail`, `/unjail`, `/lock`, `/unlock`, and `/raid` in the configured server on startup. Run `npm test` for the automated tests.
 
 ## Deploy with Coolify
 
