@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PermissionFlagsBits, PermissionsBitField } from 'discord.js';
 import {
-  CHANNEL_LOCK_ROLE_ID, canManageChannelLock, currentSendMessagesOverwrite, lockChannel, lockCommand,
+  CHANNEL_LOCK_ROLE_ID, canManageChannelLock, channelLockIndicatorMessage,
+  currentSendMessagesOverwrite, lockChannel, lockCommand, removeChannelLockIndicator,
   unlockChannel, unlockCommand,
 } from '../src/channel-lock.js';
 import { MEMBER_ROLE_ID } from '../src/membercount.js';
@@ -36,6 +37,26 @@ test('/lock and /unlock allow the configured role or an administrator', () => {
   assert.equal(canManageChannelLock(['635280852741390348']), false);
   assert.equal(canManageChannelLock(['unknown'], true), true);
   assert.equal(canManageChannelLock(['unknown']), false);
+});
+
+test('lock indicator is a light-blue container and can be removed', async () => {
+  const payload = channelLockIndicatorMessage();
+  const container = payload.components[0].toJSON();
+  assert.equal(container.accent_color, 0x8bd8f7);
+  assert.match(container.components[0].content, /🔒 Chat Locked/);
+  assert.match(container.components[0].content, /locked by staff/);
+  assert.deepEqual(payload.allowedMentions, { parse: [] });
+
+  let deleted = false;
+  const channel = {
+    messages: { fetch: async id => {
+      assert.equal(id, 'indicator');
+      return { delete: async () => { deleted = true; } };
+    } },
+  };
+  assert.equal(await removeChannelLockIndicator(channel, 'indicator'), true);
+  assert.equal(deleted, true);
+  assert.equal(await removeChannelLockIndicator(channel, null), true);
 });
 
 test('lock denies Send Messages and unlock restores the previous overwrite', async () => {

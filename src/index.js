@@ -15,7 +15,8 @@ import { acceptCommand, canUseAccept, deliverAcceptance, grantAcceptanceRoles } 
 import { postAcceptanceLog } from './acceptlogs.js';
 import { updateMemberCount } from './membercount.js';
 import {
-  canManageChannelLock, lockChannel, lockCommand, unlockChannel, unlockCommand,
+  canManageChannelLock, channelLockIndicatorMessage, lockChannel, lockCommand,
+  removeChannelLockIndicator, unlockChannel, unlockCommand,
 } from './channel-lock.js';
 import {
   JAIL_ROLE_ID, applyJailRolePermissions, canUseJail, jailCommand, jailMember,
@@ -26,6 +27,7 @@ import {
   canUseRaid, endedRaidAnnouncementMessage, getRobloxJoinInfo, raidAnnouncementMessage,
   raidCommand, raidEndMessage, resolveRobloxUser,
 } from './raid.js';
+import { canUseRoleIn, giveRoleToMembersWithRole, roleInCommand } from './rolein.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import {
   addHistory, addNote, getActiveRaid, getChannelLock, getHistory, getJail, getNotes, getState,
@@ -51,6 +53,7 @@ const buttonLabels = { ban: 'Ban', tempban: 'Temp Ban', mute: 'Mute', kick: 'Kic
 const pending = new Map();
 const activeUnjails = new Set();
 const activeRaidOperations = new Set();
+const activeRoleInOperations = new Set();
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
 const CARD_COLOR = 0x8bd8f7;
 
@@ -451,14 +454,19 @@ async function handleChannelLock(interaction, shouldLock) {
 
   if (shouldLock) {
     if (existing) return reply(interaction, 'This channel is already locked by the bot.');
+    if (typeof channel.send !== 'function') return reply(interaction, 'This channel cannot receive a lock indicator.');
     let previous;
+    let indicatorMessage;
     try {
       ({ previous } = await lockChannel(channel, interaction.guild, bot));
+      indicatorMessage = await channel.send(channelLockIndicatorMessage());
       setChannelLock({
         guildId: interaction.guildId, channelId: channel.id,
-        moderatorId: actor.id, previous, at: new Date().toISOString(),
+        moderatorId: actor.id, previous, indicatorMessageId: indicatorMessage.id,
+        at: new Date().toISOString(),
       });
     } catch (error) {
+      await indicatorMessage?.delete().catch(console.error);
       if (previous !== undefined) await unlockChannel(channel, interaction.guild, bot, previous).catch(console.error);
       console.error(`Could not lock channel ${channel.id}:`, error);
       return reply(interaction, `Could not lock this channel. ${error.message}`);
@@ -467,6 +475,7 @@ async function handleChannelLock(interaction, shouldLock) {
   }
 
   if (!existing) return reply(interaction, 'This channel does not have a saved bot lock.');
+  if (existing.source === 'raid') return reply(interaction, 'This channel is locked by an active raid. Use /raid end to unlock it.');
   try {
     await unlockChannel(channel, interaction.guild, bot, existing.previous);
     removeChannelLock(interaction.guildId, channel.id);
@@ -474,7 +483,14 @@ async function handleChannelLock(interaction, shouldLock) {
     console.error(`Could not unlock channel ${channel.id}:`, error);
     return reply(interaction, `Could not unlock this channel. ${error.message}`);
   }
-  return reply(interaction, `Unlocked <#${channel.id}> and restored the member role's previous permission.`);
+  let indicatorRemoved = true;
+  try {
+    await removeChannelLockIndicator(channel, existing.indicatorMessageId);
+  } catch (error) {
+    indicatorRemoved = false;
+    console.error(`Could not remove the lock indicator in ${channel.id}:`, error);
+  }
+  return reply(interaction, `Unlocked <#${channel.id}> and restored the member role's previous permission.${indicatorRemoved ? '' : ' The lock indicator could not be removed.'}`);
 }
 
 async function fetchTextChannel(guild, channelId, label) {
@@ -629,6 +645,43 @@ async function handleRaid(interaction) {
       : await endRaid(interaction, actor);
   } finally {
     activeRaidOperations.delete(interaction.guildId);
+  }
+}
+
+async function handleRoleIn(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const actor = await interaction.guild.members.fetch(interaction.user.id);
+  if (!canUseRoleIn(actor.roles.cache.keys(), actor.permissions.has(PermissionFlagsBits.Administrator))) {
+    return reply(interaction, 'Only full-access staff roles or administrators can use /rolein.');
+  }
+  if (activeRoleInOperations.has(interaction.guildId)) {
+    return reply(interaction, 'Another /rolein operation is already running in this server.');
+  }
+  const inRole = interaction.options.getRole('in_role', true);
+  const roleToGive = interaction.options.getRole('role_to_give', true);
+  activeRoleInOperations.add(interaction.guildId);
+  try {
+    const bot = await interaction.guild.members.fetchMe();
+    const result = await giveRoleToMembersWithRole(interaction.guild, bot, actor, inRole, roleToGive);
+    for (const failure of result.failures) {
+      console.error(`Could not give role ${roleToGive.id} to ${failure.memberId}:`, failure.error);
+    }
+    let countStatus = '';
+    if (roleToGive.id === '1547023363900313620' && result.addedCount) {
+      try {
+        const { count } = await updateMemberCount(interaction.guild);
+        countStatus = ` The xd member count was updated to ${count}.`;
+      } catch (error) {
+        console.error('Could not update the xd member count after /rolein:', error);
+        countStatus = ' The roles were assigned, but the xd member count channel could not be updated.';
+      }
+    }
+    return reply(interaction, `<@&${inRole.id}> matched ${result.matchedCount} non-bot member(s). Added <@&${roleToGive.id}> to ${result.addedCount}; ${result.alreadyHadCount} already had it; ${result.failedCount} failed.${countStatus}`);
+  } catch (error) {
+    console.error('Could not complete /rolein:', error);
+    return reply(interaction, `Could not complete the role assignment. ${error.message}`);
+  } finally {
+    activeRoleInOperations.delete(interaction.guildId);
   }
 }
 
@@ -874,6 +927,7 @@ client.on(Events.InteractionCreate, async interaction => {
     else if (interaction.isChatInputCommand() && interaction.commandName === 'lock') await handleChannelLock(interaction, true);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'unlock') await handleChannelLock(interaction, false);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'raid') await handleRaid(interaction);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'rolein') await handleRoleIn(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:view:')) await handleNavigation(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:submit:')) await handleSubmit(interaction);
@@ -939,7 +993,8 @@ client.once(Events.ClientReady, () => {
 // POST upserts each guild command without deleting any other commands in the server.
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 for (const guildCommand of [
-  command, tryoutCommand, acceptCommand, jailCommand, unjailCommand, lockCommand, unlockCommand, raidCommand,
+  command, tryoutCommand, acceptCommand, jailCommand, unjailCommand, lockCommand, unlockCommand,
+  raidCommand, roleInCommand,
 ]) {
   await rest.post(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: guildCommand.toJSON() });
 }

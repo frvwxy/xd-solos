@@ -1,4 +1,7 @@
-import { InteractionContextType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import {
+  ContainerBuilder, InteractionContextType, MessageFlags, PermissionFlagsBits,
+  SlashCommandBuilder, TextDisplayBuilder,
+} from 'discord.js';
 import { MEMBER_ROLE_ID } from './membercount.js';
 
 export const CHANNEL_LOCK_ROLE_ID = '1547023404157378641';
@@ -15,6 +18,31 @@ export const unlockCommand = new SlashCommandBuilder()
 
 export function canManageChannelLock(roleIds, hasAdministrator = false) {
   return hasAdministrator || [...roleIds].includes(CHANNEL_LOCK_ROLE_ID);
+}
+
+export function channelLockIndicatorMessage() {
+  const card = new ContainerBuilder()
+    .setAccentColor(0x8bd8f7)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      '## 🔒 Chat Locked\nThis channel has been locked by staff.',
+    ));
+  return {
+    flags: MessageFlags.IsComponentsV2,
+    components: [card],
+    allowedMentions: { parse: [] },
+  };
+}
+
+export async function removeChannelLockIndicator(channel, messageId) {
+  if (!messageId) return true;
+  try {
+    const message = await channel.messages.fetch(messageId);
+    await message.delete();
+    return true;
+  } catch (error) {
+    if (error.code === 10008) return true;
+    throw error;
+  }
 }
 
 async function validate(channel, guild, bot) {
