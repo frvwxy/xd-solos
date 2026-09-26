@@ -28,6 +28,7 @@ import {
   raidCommand, raidEndMessage, resolveRobloxUser,
 } from './raid.js';
 import { canUseRoleIn, giveRoleToMembersWithRole, roleInCommand } from './rolein.js';
+import { canUsePure, pureCommand, purePublicMessage, serverMuteIfInVoice } from './pure.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import {
   addHistory, addNote, getActiveRaid, getChannelLock, getHistory, getJail, getNotes, getState,
@@ -54,7 +55,9 @@ const pending = new Map();
 const activeUnjails = new Set();
 const activeRaidOperations = new Set();
 const activeRoleInOperations = new Set();
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates],
+});
 const CARD_COLOR = 0x8bd8f7;
 
 const command = new SlashCommandBuilder()
@@ -685,6 +688,65 @@ async function handleRoleIn(interaction) {
   }
 }
 
+async function handlePure(interaction) {
+  if (!canUsePure(interaction.user.id)) return reply(interaction, 'This command is restricted to its owner.');
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const user = interaction.options.getUser('user', true);
+  const reason = interaction.options.getString('reason', true).trim();
+  if (!reason) return reply(interaction, 'A warning reason is required.');
+  if (user.bot) return reply(interaction, 'Choose a server member, not a bot.');
+
+  const [actor, member, bot] = await Promise.all([
+    interaction.guild.members.fetch(interaction.user.id),
+    interaction.guild.members.fetch({ user: user.id, force: true }).catch(() => null),
+    interaction.guild.members.fetchMe(),
+  ]);
+  if (!member) return reply(interaction, 'That user is not in this server.');
+  if (!canActOn(actor, member, interaction.guild)) {
+    return reply(interaction, 'Role hierarchy prevents you from using /pure on this member.');
+  }
+
+  try {
+    getState().warnings.push({
+      guildId: interaction.guildId, targetId: user.id, moderatorId: actor.id,
+      reason, at: new Date().toISOString(),
+    });
+    saveState();
+  } catch (error) {
+    console.error('Could not save /pure warning:', error);
+    return reply(interaction, 'The warning could not be saved. Check the bot console.');
+  }
+
+  const dmSent = await notify(member, interaction.guild, actor, 'warn', reason, null);
+  let voiceStatus = 'not currently in voice';
+  try {
+    const voice = await serverMuteIfInVoice(member, bot, actor.id, reason);
+    if (voice.connected) voiceStatus = voice.alreadyMuted ? 'already server muted' : 'server muted';
+  } catch (error) {
+    voiceStatus = 'voice mute failed';
+    console.error(`Could not server mute ${user.id} for /pure:`, error);
+  }
+  const historySaved = saveHistorySafely({
+    guildId: interaction.guildId, targetId: user.id, moderatorId: actor.id,
+    action: 'warn', reason, duration: null, dmSent,
+  });
+  const logSent = await postModLog(interaction.guild, {
+    targetId: user.id, moderatorId: actor.id, action: 'warn', reason, duration: null, dmSent,
+  });
+
+  let publicSent = true;
+  try {
+    const channel = interaction.channel
+      ?? await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
+    if (typeof channel?.send !== 'function') throw new Error('Command channel cannot receive messages.');
+    await channel.send(purePublicMessage());
+  } catch (error) {
+    publicSent = false;
+    console.error('Could not send the public /pure response:', error);
+  }
+  return reply(interaction, `${escapeMarkdown(user.username)} was warned; DM ${dmSent ? 'sent' : 'failed'}; voice status: ${voiceStatus}.${historySaved ? '' : ' Warning: history could not be saved.'}${logSent ? '' : ' Warning: moderation log could not be posted.'}${publicSent ? '' : ' Warning: the public response could not be posted.'}`);
+}
+
 function getPending(interaction, nonce) {
   return getPendingCard(pending, nonce, interaction.user.id, interaction.guildId);
 }
@@ -928,6 +990,7 @@ client.on(Events.InteractionCreate, async interaction => {
     else if (interaction.isChatInputCommand() && interaction.commandName === 'unlock') await handleChannelLock(interaction, false);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'raid') await handleRaid(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'rolein') await handleRoleIn(interaction);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'pure') await handlePure(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:view:')) await handleNavigation(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:submit:')) await handleSubmit(interaction);
@@ -994,7 +1057,7 @@ client.once(Events.ClientReady, () => {
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 for (const guildCommand of [
   command, tryoutCommand, acceptCommand, jailCommand, unjailCommand, lockCommand, unlockCommand,
-  raidCommand, roleInCommand,
+  raidCommand, roleInCommand, pureCommand,
 ]) {
   await rest.post(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: guildCommand.toJSON() });
 }

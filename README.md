@@ -18,6 +18,8 @@ Jail role `1551368750488354896` is denied **View Channel** everywhere except jai
 
 `/rolein in_role:<role> role_to_give:<role>` gives the destination role to every non-bot member who has the source role and does not already have the destination role. It is available to administrators and the three full-access `/user` roles. The command rejects `@everyone`, managed roles, matching source/destination roles, and destination roles that are not below both the staff member and the bot. Members above the bot are skipped and counted as failures. Only one bulk role assignment runs at a time, and the private result reports matched, added, already-present, and failed counts. If the destination is the xd member role, the member-count channel is refreshed automatically. The bot needs **Manage Roles** and **Server Members Intent**.
 
+`/pure user:<member> reason:<reason>` is restricted to Discord user `635280852741390348`. It records a normal warning, DMs the member, adds the action to moderation history and the moderation log, and server-mutes the member when they are currently connected to voice. It then publicly responds “pure is a chuddy chud” and privately reports delivery and voice-mute status to the command owner. The voice mute is not timed and remains until staff manually unmutes the member. The bot needs **Mute Members**, Send Messages, and a role above the target. The included Guild Voice States gateway intent is not privileged and does not require an additional Developer Portal toggle.
+
 ## Staff roles
 
 The IDs in `src/policy.js` are treated as **Discord role IDs**, not individual user IDs. The bot checks these roles when the menu is opened and again when an action is submitted.
@@ -37,7 +39,7 @@ These roles do not need Discord's native moderation permissions; the **bot** nee
 1. Install Node.js 20+ and run `npm install` in this folder.
 2. Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications). Under **Bot → Privileged Gateway Intents**, enable **Server Members Intent** so the bot receives member-join events. Copy `.env.example` to `.env` and fill in the bot token, application/client ID, and your server ID (`1547021317193080882` for the configured welcome/verification links). Never commit or share `.env`.
 3. Invite the bot using OAuth2 scopes `bot` and `applications.commands`. Give the **bot** Ban Members, Kick Members, Moderate Members, Manage Roles, Manage Channels, and Embed Links, and put its role above members it will moderate and all six `/accept` roles. It also needs View Channel, Send Messages, and Embed Links in welcome channel `1547022446748508210` and in the channels where `/tryout` or `/accept` is used. The authorized staff roles must also be above their targets. Restrict commands in Server Settings → Integrations if desired; the bot enforces the role list regardless of that setting.
-4. Run `npm start`. The bot registers `/user`, `/tryout`, `/accept`, `/jail`, `/unjail`, `/lock`, `/unlock`, `/raid`, and `/rolein` in the configured server on startup. Run `npm test` for the automated tests.
+4. Run `npm start`. The bot registers `/user`, `/tryout`, `/accept`, `/jail`, `/unjail`, `/lock`, `/unlock`, `/raid`, `/rolein`, and `/pure` in the configured server on startup. Run `npm test` for the automated tests.
 
 ## Deploy with Coolify
 
