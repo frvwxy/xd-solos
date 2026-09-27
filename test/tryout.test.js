@@ -21,9 +21,10 @@ test('/tryout requires a user option', () => {
 test('/tryout allows existing moderation roles and the additional staff role without granting /user access', () => {
   assert.equal(ADDITIONAL_TRYOUT_ROLE_ID, '1551403954745905222');
   for (const id of [
-    '1547023959118192680', '635280852741390348', '1550346816351113356',
+    '1547023959118192680', '1550346816351113356',
     '1547023304219697152', '1547023404157378641', ADDITIONAL_TRYOUT_ROLE_ID,
   ]) assert.equal(canUseTryout([id]), true);
+  assert.equal(canUseTryout([], '635280852741390348'), true);
   assert.equal(accessLevel([ADDITIONAL_TRYOUT_ROLE_ID]), 'none');
   assert.equal(canUseTryout(['123']), false);
 });

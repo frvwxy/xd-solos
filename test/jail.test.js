@@ -69,7 +69,7 @@ test('/jail directly requires a user and offers an optional reason', () => {
   assert.equal(unjailCommand.toJSON().name, 'unjail');
   assert.equal(unjailCommand.toJSON().options[0].name, 'member');
   assert.equal(canUseJail(['1547023404157378641']), true);
-  assert.equal(canUseJail(['635280852741390348']), true);
+  assert.equal(canUseJail([], '635280852741390348'), true);
   assert.equal(canUseJail(['unknown']), false);
 });
 

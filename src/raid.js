@@ -2,6 +2,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, InteractionContextType,
   PermissionFlagsBits, SlashCommandBuilder, escapeMarkdown,
 } from 'discord.js';
+import { isBotOwner } from './policy.js';
 
 export const RAID_LOCK_CHANNEL_ID = '1547135508054806589';
 export const RAID_ANNOUNCEMENT_CHANNEL_ID = '1547135372167749692';
@@ -44,8 +45,8 @@ export const raidCommand = new SlashCommandBuilder()
         { name: 'Lost', value: 'lost' },
       )));
 
-export function canUseRaid(roleIds, hasAdministrator = false) {
-  return hasAdministrator || [...roleIds].includes(RAID_STAFF_ROLE_ID);
+export function canUseRaid(roleIds, hasAdministrator = false, userId = null) {
+  return isBotOwner(userId) || hasAdministrator || [...roleIds].includes(RAID_STAFF_ROLE_ID);
 }
 
 async function postJson(url, body, fetchImpl) {

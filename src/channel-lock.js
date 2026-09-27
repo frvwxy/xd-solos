@@ -3,6 +3,7 @@ import {
   SlashCommandBuilder, TextDisplayBuilder,
 } from 'discord.js';
 import { MEMBER_ROLE_ID } from './membercount.js';
+import { isBotOwner } from './policy.js';
 
 export const CHANNEL_LOCK_ROLE_ID = '1547023404157378641';
 
@@ -16,8 +17,8 @@ export const unlockCommand = new SlashCommandBuilder()
   .setDescription('Restore member messaging permissions in this channel')
   .setContexts(InteractionContextType.Guild);
 
-export function canManageChannelLock(roleIds, hasAdministrator = false) {
-  return hasAdministrator || [...roleIds].includes(CHANNEL_LOCK_ROLE_ID);
+export function canManageChannelLock(roleIds, hasAdministrator = false, userId = null) {
+  return isBotOwner(userId) || hasAdministrator || [...roleIds].includes(CHANNEL_LOCK_ROLE_ID);
 }
 
 export function channelLockIndicatorMessage() {

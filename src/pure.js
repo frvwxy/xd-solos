@@ -1,8 +1,9 @@
 import {
   EmbedBuilder, InteractionContextType, PermissionFlagsBits, SlashCommandBuilder,
 } from 'discord.js';
+import { BOT_OWNER_USER_ID, isBotOwner } from './policy.js';
 
-export const PURE_OWNER_USER_ID = '635280852741390348';
+export const PURE_OWNER_USER_ID = BOT_OWNER_USER_ID;
 
 export const pureCommand = new SlashCommandBuilder()
   .setName('pure')
@@ -19,7 +20,7 @@ export const pureCommand = new SlashCommandBuilder()
     .setMaxLength(300));
 
 export function canUsePure(userId) {
-  return userId === PURE_OWNER_USER_ID;
+  return isBotOwner(userId);
 }
 
 export async function serverMuteIfInVoice(member, bot, moderatorId, reason) {

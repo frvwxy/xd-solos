@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { accessLevel, allowedActions, canPerform, unbanUnavailableReason, visibleActions } from '../src/policy.js';
+import {
+  BOT_OWNER_USER_ID, accessLevel, allowedActions, canPerform, isBotOwner,
+  unbanUnavailableReason, visibleActions,
+} from '../src/policy.js';
 
 test('full roles may use every action, including permanent ban and unban', () => {
-  for (const id of ['1547023959118192680', '635280852741390348', '1550346816351113356']) {
+  for (const id of ['1547023959118192680', '1550346816351113356']) {
     assert.equal(accessLevel([id]), 'full');
   }
   assert.deepEqual(allowedActions('full'), ['ban', 'tempban', 'mute', 'kick', 'warn', 'unban', 'history']);
@@ -30,7 +33,14 @@ test('limited role can only mute, warn, and see history', () => {
 test('unknown roles are denied and higher access wins', () => {
   assert.equal(accessLevel(['123']), 'none');
   assert.equal(canPerform('none', 'history'), false);
-  assert.equal(accessLevel(['1547023404157378641', '635280852741390348']), 'full');
+  assert.equal(accessLevel(['1547023404157378641', '1547023959118192680']), 'full');
+});
+
+test('the configured bot owner always receives full access', () => {
+  assert.equal(BOT_OWNER_USER_ID, '635280852741390348');
+  assert.equal(isBotOwner(BOT_OWNER_USER_ID), true);
+  assert.equal(isBotOwner('someone-else'), false);
+  assert.equal(accessLevel([], BOT_OWNER_USER_ID), 'full');
 });
 
 test('card buttons reflect membership, ban status, and role tier', () => {

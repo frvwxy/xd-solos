@@ -5,7 +5,7 @@ import {
   SectionBuilder, SeparatorBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle, ThumbnailBuilder, escapeMarkdown,
 } from 'discord.js';
 import { MAX_BAN, MAX_TIMEOUT, formatDuration, parseDuration } from './duration.js';
-import { accessLevel, canPerform, unbanUnavailableReason, visibleActions } from './policy.js';
+import { accessLevel, canPerform, isBotOwner, unbanUnavailableReason, visibleActions } from './policy.js';
 import { actionButtons } from './buttons.js';
 import { notificationMessage } from './notifications.js';
 import { postModLog } from './modlogs.js';
@@ -87,7 +87,8 @@ async function reply(interaction, content) {
 
 function canActOn(actor, target, guild) {
   if (target.id === guild.ownerId || actor.id === target.id || target.id === client.user.id) return false;
-  return actor.id === guild.ownerId || actor.roles.highest.comparePositionTo(target.roles.highest) > 0;
+  return isBotOwner(actor.id) || actor.id === guild.ownerId
+    || actor.roles.highest.comparePositionTo(target.roles.highest) > 0;
 }
 
 async function resolveMembers(interaction, targetId) {
@@ -251,7 +252,7 @@ async function handleCommand(interaction) {
   await interaction.deferReply();
   const targetId = selectedUser?.id ?? typedId;
   const { actor, target, bot } = await resolveMembers(interaction, targetId);
-  const level = accessLevel(actor.roles.cache.keys());
+  const level = accessLevel(actor.roles.cache.keys(), actor.id);
   if (level === 'none') return reply(interaction, 'Your roles do not allow use of this moderation command.');
   let ban = null;
   let banCheckFailed = false;
@@ -292,7 +293,7 @@ async function handleActivity(interaction) {
   const user = interaction.options.getUser('user', true);
   if (user.bot) return reply(interaction, 'Choose a server member, not a bot.');
   const { actor, target } = await resolveMembers(interaction, user.id);
-  const level = accessLevel(actor.roles.cache.keys());
+  const level = accessLevel(actor.roles.cache.keys(), actor.id);
   if (level === 'none') return reply(interaction, 'Your roles do not allow use of /activity.');
   if (!target) return reply(interaction, 'That user is no longer in this server.');
 
@@ -324,7 +325,7 @@ async function handleActivity(interaction) {
 async function handleTryout(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (!canUseTryout(actor.roles.cache.keys())) {
+  if (!canUseTryout(actor.roles.cache.keys(), actor.id)) {
     return reply(interaction, 'Your roles do not allow use of this command.');
   }
   const user = interaction.options.getUser('user');
@@ -341,7 +342,7 @@ async function handleTryout(interaction) {
 async function handleAccept(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (!canUseAccept(actor.roles.cache.keys())) {
+  if (!canUseAccept(actor.roles.cache.keys(), actor.id)) {
     return reply(interaction, 'Your roles do not allow use of /accept.');
   }
   const user = interaction.options.getUser('user');
@@ -386,7 +387,7 @@ async function handleAccept(interaction) {
 async function handleJail(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (!canUseJail(actor.roles.cache.keys())) {
+  if (!canUseJail(actor.roles.cache.keys(), actor.id)) {
     return reply(interaction, 'Your roles do not allow use of /jail.');
   }
   const user = interaction.options.getUser('user');
@@ -441,7 +442,7 @@ async function handleJail(interaction) {
 async function handleUnjail(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (!canUseJail(actor.roles.cache.keys())) {
+  if (!canUseJail(actor.roles.cache.keys(), actor.id)) {
     return reply(interaction, 'Your roles do not allow use of /unjail.');
   }
   const user = interaction.options.getUser('member');
@@ -484,7 +485,7 @@ async function handleChannelLock(interaction, shouldLock) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
   if (!canManageChannelLock(
-    actor.roles.cache.keys(), actor.permissions.has(PermissionFlagsBits.Administrator),
+    actor.roles.cache.keys(), actor.permissions.has(PermissionFlagsBits.Administrator), actor.id,
   )) {
     return reply(interaction, 'You need the channel-lock role or Administrator permission to use this command.');
   }
@@ -676,7 +677,9 @@ async function endRaid(interaction, actor) {
 async function handleRaid(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (!canUseRaid(actor.roles.cache.keys(), actor.permissions.has(PermissionFlagsBits.Administrator))) {
+  if (!canUseRaid(
+    actor.roles.cache.keys(), actor.permissions.has(PermissionFlagsBits.Administrator), actor.id,
+  )) {
     return reply(interaction, 'You need the raid staff role or Administrator permission to use this command.');
   }
   if (activeRaidOperations.has(interaction.guildId)) return reply(interaction, 'Another raid action is already in progress.');
@@ -693,7 +696,9 @@ async function handleRaid(interaction) {
 async function handleRoleIn(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (!canUseRoleIn(actor.roles.cache.keys(), actor.permissions.has(PermissionFlagsBits.Administrator))) {
+  if (!canUseRoleIn(
+    actor.roles.cache.keys(), actor.permissions.has(PermissionFlagsBits.Administrator), actor.id,
+  )) {
     return reply(interaction, 'Only full-access staff roles or administrators can use /rolein.');
   }
   if (activeRoleInOperations.has(interaction.guildId)) {
@@ -793,7 +798,7 @@ function getPending(interaction, nonce) {
 async function showView(interaction, nonce, item, view) {
   await interaction.deferUpdate();
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (!canPerform(accessLevel(actor.roles.cache.keys()), 'history')) {
+  if (!canPerform(accessLevel(actor.roles.cache.keys(), actor.id), 'history')) {
     return interaction.editReply({ components: [panel('Access denied', `Discord user \`${item.targetId}\``, 'Your roles no longer allow access to these records.')] });
   }
   return interaction.editReply({ ...panelPayload(nonce, item, view), allowedMentions: { parse: [] } });
@@ -802,7 +807,7 @@ async function showView(interaction, nonce, item, view) {
 async function showPrivateRecords(interaction, nonce, item) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (!canPerform(accessLevel(actor.roles.cache.keys()), 'history')) {
+  if (!canPerform(accessLevel(actor.roles.cache.keys(), actor.id), 'history')) {
     return reply(interaction, 'Your roles no longer allow access to these records.');
   }
   return interaction.editReply({
@@ -853,7 +858,7 @@ async function handleNoteSubmit(interaction) {
   if (!note) return reply(interaction, 'The note cannot be empty.');
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const actor = await interaction.guild.members.fetch(interaction.user.id);
-  if (!canPerform(accessLevel(actor.roles.cache.keys()), 'history')) {
+  if (!canPerform(accessLevel(actor.roles.cache.keys(), actor.id), 'history')) {
     return reply(interaction, 'Your roles no longer allow access to moderator notes.');
   }
   try {
@@ -903,7 +908,7 @@ async function performAction(interaction, item, action, reason, duration, durati
   const { targetId } = item;
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const { actor, target, bot } = await resolveMembers(interaction, targetId);
-  const level = accessLevel(actor.roles.cache.keys());
+  const level = accessLevel(actor.roles.cache.keys(), actor.id);
   if (!canPerform(level, action)) return reply(interaction, 'Your roles no longer allow that action.');
   const auditReason = `${reason} | moderator ${actor.id}`;
 

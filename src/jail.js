@@ -17,8 +17,8 @@ export const unjailCommand = new SlashCommandBuilder()
   .setContexts(InteractionContextType.Guild)
   .addUserOption(option => option.setName('member').setDescription('Member to unjail').setRequired(true));
 
-export function canUseJail(roleIds) {
-  return accessLevel(roleIds) !== 'none';
+export function canUseJail(roleIds, userId = null) {
+  return accessLevel(roleIds, userId) !== 'none';
 }
 
 export async function applyJailRolePermissions(channel) {

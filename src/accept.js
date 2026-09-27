@@ -1,5 +1,6 @@
 import { InteractionContextType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { cardMessage, cardWithHeader } from './cards.js';
+import { isBotOwner } from './policy.js';
 
 export const ACCEPT_ROLE_IDS = [
   '1551356027973148802',
@@ -19,8 +20,8 @@ export const ACCEPT_COMMAND_ROLE_IDS = [
 ];
 const acceptCommandRoles = new Set(ACCEPT_COMMAND_ROLE_IDS);
 
-export function canUseAccept(roleIds) {
-  return [...roleIds].some(id => acceptCommandRoles.has(id));
+export function canUseAccept(roleIds, userId = null) {
+  return isBotOwner(userId) || [...roleIds].some(id => acceptCommandRoles.has(id));
 }
 
 export const acceptCommand = new SlashCommandBuilder()

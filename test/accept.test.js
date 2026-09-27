@@ -58,6 +58,7 @@ test('/accept is available to exactly the five requested staff roles', () => {
   ]);
   for (const id of ACCEPT_COMMAND_ROLE_IDS) assert.equal(canUseAccept([id]), true);
   assert.equal(canUseAccept(['635280852741390348']), false);
+  assert.equal(canUseAccept([], '635280852741390348'), true);
   assert.equal(canUseAccept(['123']), false);
   assert.equal(canUseAccept(['123', ACCEPT_COMMAND_ROLE_IDS[0]]), true);
 });

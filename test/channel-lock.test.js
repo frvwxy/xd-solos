@@ -35,6 +35,7 @@ test('/lock and /unlock allow the configured role or an administrator', () => {
   assert.equal(CHANNEL_LOCK_ROLE_ID, '1547023404157378641');
   assert.equal(canManageChannelLock([CHANNEL_LOCK_ROLE_ID]), true);
   assert.equal(canManageChannelLock(['635280852741390348']), false);
+  assert.equal(canManageChannelLock([], false, '635280852741390348'), true);
   assert.equal(canManageChannelLock(['unknown'], true), true);
   assert.equal(canManageChannelLock(['unknown']), false);
 });

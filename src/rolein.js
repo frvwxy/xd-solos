@@ -1,5 +1,5 @@
 import { InteractionContextType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
-import { accessLevel } from './policy.js';
+import { accessLevel, isBotOwner } from './policy.js';
 
 const ROLE_ASSIGN_CONCURRENCY = 4;
 
@@ -16,8 +16,8 @@ export const roleInCommand = new SlashCommandBuilder()
     .setDescription('Role to give to the selected members')
     .setRequired(true));
 
-export function canUseRoleIn(roleIds, hasAdministrator = false) {
-  return hasAdministrator || accessLevel(roleIds) === 'full';
+export function canUseRoleIn(roleIds, hasAdministrator = false, userId = null) {
+  return isBotOwner(userId) || hasAdministrator || accessLevel(roleIds) === 'full';
 }
 
 function validateRoles(guild, bot, actor, inRole, roleToGive) {
@@ -31,7 +31,7 @@ function validateRoles(guild, bot, actor, inRole, roleToGive) {
   if (bot.roles.highest.comparePositionTo(roleToGive) <= 0) {
     throw new Error('The bot role must be above the destination role.');
   }
-  if (actor.id !== guild.ownerId && actor.roles.highest.comparePositionTo(roleToGive) <= 0) {
+  if (!isBotOwner(actor.id) && actor.id !== guild.ownerId && actor.roles.highest.comparePositionTo(roleToGive) <= 0) {
     throw new Error('Your highest role must be above the destination role.');
   }
 }

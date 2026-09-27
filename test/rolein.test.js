@@ -56,7 +56,7 @@ test('/rolein requires a source role and destination role', () => {
 
 test('/rolein allows administrators and full-access staff only', () => {
   assert.equal(canUseRoleIn(['1547023959118192680']), true);
-  assert.equal(canUseRoleIn(['635280852741390348']), true);
+  assert.equal(canUseRoleIn([], false, '635280852741390348'), true);
   assert.equal(canUseRoleIn(['1550346816351113356']), true);
   assert.equal(canUseRoleIn(['1547023404157378641']), false);
   assert.equal(canUseRoleIn(['unknown'], true), true);

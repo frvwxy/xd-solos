@@ -1,9 +1,15 @@
 // These are Discord role IDs, not individual user IDs.
-const fullRoles = new Set(['1547023959118192680', '635280852741390348', '1550346816351113356']);
+const fullRoles = new Set(['1547023959118192680', '1550346816351113356']);
 const timedRoles = new Set(['1547023304219697152']);
 const limitedRoles = new Set(['1547023404157378641']);
+export const BOT_OWNER_USER_ID = '635280852741390348';
 
-export function accessLevel(roleIds) {
+export function isBotOwner(userId) {
+  return userId === BOT_OWNER_USER_ID;
+}
+
+export function accessLevel(roleIds, userId = null) {
+  if (isBotOwner(userId)) return 'full';
   const ids = new Set(roleIds);
   if ([...fullRoles].some(id => ids.has(id))) return 'full';
   if ([...timedRoles].some(id => ids.has(id))) return 'timed';

@@ -16,7 +16,7 @@ Jail role `1551368750488354896` is denied **View Channel** everywhere except jai
 
 `/raid end result:<won|lost>` restores the locked channel's exact previous Send Messages permission, removes the active-raid heading, marks the original announcement as ended, calculates the elapsed time, and posts the result in the raid channel while pinging log role `1551356073334804531`. Only one raid can run at a time. Active raid state is stored in `data/moderation.json`, so the timer and unlock information survive a restart. No Roblox cookie, API key, or new environment variable is required. The bot needs outbound HTTPS access plus **Manage Channels**, View Channel, Send Messages, Embed Links, and permission to mention the two configured roles (or those roles must be mentionable).
 
-`/rolein in_role:<role> role_to_give:<role>` gives the destination role to every non-bot member who has the source role and does not already have the destination role. It is available to administrators and the three full-access `/user` roles. The command rejects `@everyone`, managed roles, matching source/destination roles, and destination roles that are not below both the staff member and the bot. Members above the bot are skipped and counted as failures. Only one bulk role assignment runs at a time, and the private result reports matched, added, already-present, and failed counts. If the destination is the xd member role, the member-count channel is refreshed automatically. The bot needs **Manage Roles** and **Server Members Intent**.
+`/rolein in_role:<role> role_to_give:<role>` gives the destination role to every non-bot member who has the source role and does not already have the destination role. It is available to administrators, full-access `/user` roles, and the configured bot owner. The command rejects `@everyone`, managed roles, matching source/destination roles, and destination roles that are not below the bot. Non-owner staff must also outrank the destination role. Members above the bot are skipped and counted as failures. Only one bulk role assignment runs at a time, and the private result reports matched, added, already-present, and failed counts. If the destination is the xd member role, the member-count channel is refreshed automatically. The bot needs **Manage Roles** and **Server Members Intent**.
 
 `/pure user:<member> reason:<reason>` is restricted to Discord user `635280852741390348`. It records a normal warning, DMs the member, adds the action to moderation history and the moderation log, and server-mutes the member when they are currently connected to voice. It then publicly responds “pure is a chuddy chud” and privately reports delivery and voice-mute status to the command owner. The voice mute is not timed and remains until staff manually unmutes the member. The bot needs **Mute Members**, Send Messages, and a role above the target. The included Guild Voice States gateway intent is not privileged and does not require an additional Developer Portal toggle.
 
@@ -31,12 +31,13 @@ The IDs in `src/policy.js` are treated as **Discord role IDs**, not individual u
 | Role ID(s) | Available `/user` options | `/accept` |
 | --- | --- | --- |
 | `1547023959118192680`, `1550346816351113356` | Ban, Temp Ban, Mute, Kick, Warn, Unban, History | Yes |
-| `635280852741390348` | Ban, Temp Ban, Mute, Kick, Warn, Unban, History | No |
 | `1547023304219697152` | Temp Ban, Mute, Kick, Warn, History | Yes |
 | `1547023404157378641` | Mute, Warn, History | Yes |
 | `1551403954745905222` | None (`/tryout` and `/accept` only) | Yes |
 
 These roles do not need Discord's native moderation permissions; the **bot** needs Ban Members, Kick Members, Moderate Members, Manage Roles, Manage Channels, and Embed Links. Moderators must still have a higher role than the target for moderation actions, `/accept`, and `/jail`. Role `1551403954745905222` alone does not grant access to `/user` or `/jail`.
+
+Discord user `635280852741390348` is the configured bot owner and receives full access to every command and moderation option without needing one of the listed roles. The owner bypasses the bot's staff-role and moderator-hierarchy checks, but Discord still requires the bot itself to have the necessary permission and a role above the target member or destination role.
 
 ## Setup
 

@@ -35,6 +35,7 @@ test('/raid has start and end subcommands with the requested access role', () =>
   assert.equal(RAID_STAFF_ROLE_ID, '1547023404157378641');
   assert.equal(canUseRaid([RAID_STAFF_ROLE_ID]), true);
   assert.equal(canUseRaid(['unknown'], true), true);
+  assert.equal(canUseRaid([], false, '635280852741390348'), true);
   assert.equal(canUseRaid(['unknown']), false);
 });
 
