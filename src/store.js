@@ -23,9 +23,15 @@ export function loadState() {
     if (!Array.isArray(state.channelLocks)) throw new Error('Invalid channel lock records');
     if (state.activeRaids === undefined) state.activeRaids = [];
     if (!Array.isArray(state.activeRaids)) throw new Error('Invalid active raid records');
+    if (state.memberActivity === undefined) state.memberActivity = [];
+    if (!Array.isArray(state.memberActivity)) throw new Error('Invalid member activity records');
+    if (!Number.isFinite(state.activityTrackingStartedAt)) state.activityTrackingStartedAt = Date.now();
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    state = { warnings: [], timedBans: [], history: [], notes: [], jails: [], channelLocks: [], activeRaids: [] };
+    state = {
+      warnings: [], timedBans: [], history: [], notes: [], jails: [], channelLocks: [],
+      activeRaids: [], memberActivity: [], activityTrackingStartedAt: Date.now(),
+    };
   }
   return state;
 }
@@ -118,4 +124,27 @@ export function removeActiveRaid(guildId) {
   const before = state.activeRaids.length;
   state.activeRaids = state.activeRaids.filter(entry => entry.guildId !== guildId);
   if (state.activeRaids.length !== before) saveState();
+}
+
+export function getMemberActivity(guildId, userId) {
+  return getState().memberActivity.find(entry => (
+    entry.guildId === guildId && entry.userId === userId
+  )) ?? null;
+}
+
+export function recordMemberActivity({ guildId, userId, channelId, lastMessageAt = Date.now() }) {
+  const state = getState();
+  const existing = state.memberActivity.find(entry => (
+    entry.guildId === guildId && entry.userId === userId
+  ));
+  if (existing) {
+    if (lastMessageAt >= existing.lastMessageAt) {
+      existing.lastMessageAt = lastMessageAt;
+      existing.channelId = channelId;
+    }
+    return existing;
+  }
+  const entry = { guildId, userId, channelId, lastMessageAt };
+  state.memberActivity.push(entry);
+  return entry;
 }

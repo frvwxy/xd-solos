@@ -13,7 +13,7 @@ import { postWelcome } from './welcome.js';
 import { canUseTryout, deliverTryout, tryoutCommand } from './tryout.js';
 import { acceptCommand, canUseAccept, deliverAcceptance, grantAcceptanceRoles } from './accept.js';
 import { postAcceptanceLog } from './acceptlogs.js';
-import { updateMemberCount } from './membercount.js';
+import { hasMemberRole, updateMemberCount } from './membercount.js';
 import {
   canManageChannelLock, channelLockIndicatorMessage, lockChannel, lockCommand,
   removeChannelLockIndicator, unlockChannel, unlockCommand,
@@ -29,11 +29,12 @@ import {
 } from './raid.js';
 import { canUseRoleIn, giveRoleToMembersWithRole, roleInCommand } from './rolein.js';
 import { canUsePure, pureCommand, purePublicMessage, serverMuteIfInVoice } from './pure.js';
+import { activityCard, activityCommand, activityStatus } from './activity.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import {
-  addHistory, addNote, getActiveRaid, getChannelLock, getHistory, getJail, getNotes, getState,
-  loadState, removeActiveRaid, removeChannelLock, removeJail, saveState, setActiveRaid,
-  setChannelLock, setJail,
+  addHistory, addNote, getActiveRaid, getChannelLock, getHistory, getJail, getMemberActivity,
+  getNotes, getState, loadState, recordMemberActivity, removeActiveRaid, removeChannelLock,
+  removeJail, saveState, setActiveRaid, setChannelLock, setJail,
 } from './store.js';
 
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
@@ -41,6 +42,7 @@ if (!DISCORD_TOKEN || !CLIENT_ID || !GUILD_ID) {
   throw new Error('Set DISCORD_TOKEN, CLIENT_ID, and GUILD_ID in .env');
 }
 loadState();
+saveState();
 
 const actions = {
   ban: { verb: 'banned' },
@@ -56,7 +58,10 @@ const activeUnjails = new Set();
 const activeRaidOperations = new Set();
 const activeRoleInOperations = new Set();
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates],
+  intents: [
+    GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages,
+  ],
 });
 const CARD_COLOR = 0x8bd8f7;
 
@@ -72,7 +77,7 @@ async function reply(interaction, content) {
     embeds: [new EmbedBuilder().setColor(CARD_COLOR).setDescription(content)],
     allowedMentions: { parse: [] },
   };
-  if (interaction.isChatInputCommand() && interaction.commandName === 'user' && interaction.deferred && !interaction.replied) {
+  if (interaction.isChatInputCommand() && ['user', 'activity'].includes(interaction.commandName) && interaction.deferred && !interaction.replied) {
     await interaction.deleteReply();
     return interaction.followUp({ ...payload, flags: MessageFlags.Ephemeral });
   }
@@ -274,6 +279,40 @@ async function handleCommand(interaction) {
     expiresAt: Date.now() + CARD_IDLE_MS,
   });
   await interaction.editReply({
+    content: null,
+    embeds: null,
+    flags: MessageFlags.IsComponentsV2,
+    components: [pending.get(nonce).profile],
+    allowedMentions: { parse: [] },
+  });
+}
+
+async function handleActivity(interaction) {
+  await interaction.deferReply();
+  const user = interaction.options.getUser('user', true);
+  if (user.bot) return reply(interaction, 'Choose a server member, not a bot.');
+  const { actor, target } = await resolveMembers(interaction, user.id);
+  const level = accessLevel(actor.roles.cache.keys());
+  if (level === 'none') return reply(interaction, 'Your roles do not allow use of /activity.');
+  if (!target) return reply(interaction, 'That user is no longer in this server.');
+
+  const record = getMemberActivity(interaction.guildId, user.id);
+  const trackingStartedAt = getState().activityTrackingStartedAt;
+  const status = activityStatus(record, trackingStartedAt);
+  const canModerate = canActOn(actor, target, interaction.guild);
+  const available = visibleActions(level, {
+    canModerate: status.state === 'inactive' && canModerate,
+  }).filter(action => ['kick', 'warn', 'history'].includes(action));
+  const nonce = randomUUID();
+  pending.set(nonce, {
+    actorId: actor.id, targetId: user.id, guildId: interaction.guildId,
+    available,
+    profile: activityCard(target, record, trackingStartedAt, nonce, available),
+    activityGate: true, historyDirect: true,
+    forms: new Map(), busy: false,
+    expiresAt: Date.now() + CARD_IDLE_MS,
+  });
+  return interaction.editReply({
     content: null,
     embeds: null,
     flags: MessageFlags.IsComponentsV2,
@@ -770,7 +809,7 @@ async function showPrivateRecords(interaction, nonce, item) {
     content: null,
     embeds: null,
     flags: MessageFlags.IsComponentsV2,
-    ...panelPayload(nonce, item, 'records'),
+    ...panelPayload(nonce, item, item.historyDirect ? 'history' : 'records'),
     allowedMentions: { parse: [] },
   });
 }
@@ -834,6 +873,15 @@ async function handleSubmit(interaction) {
   }
   item.forms.delete(formId);
   if (item.busy) return reply(interaction, 'Another action from this card is in progress. Try again shortly.');
+  if (item.activityGate && (action === 'warn' || action === 'kick')) {
+    const status = activityStatus(
+      getMemberActivity(interaction.guildId, item.targetId),
+      getState().activityTrackingStartedAt,
+    );
+    if (status.state !== 'inactive') {
+      return reply(interaction, 'This member is no longer marked inactive. Run /activity again to refresh the card.');
+    }
+  }
   const enteredReason = interaction.fields.fields.has('reason') ? interaction.fields.getTextInputValue('reason').trim() : '';
   if (action === 'ban' && !enteredReason) return reply(interaction, 'A reason is required for a permanent ban.');
   const reason = enteredReason || 'No reason provided';
@@ -991,6 +1039,7 @@ client.on(Events.InteractionCreate, async interaction => {
     else if (interaction.isChatInputCommand() && interaction.commandName === 'raid') await handleRaid(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'rolein') await handleRoleIn(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'pure') await handlePure(interaction);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'activity') await handleActivity(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:choose:')) await handleChoice(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('mod:view:')) await handleNavigation(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('mod:submit:')) await handleSubmit(interaction);
@@ -999,6 +1048,31 @@ client.on(Events.InteractionCreate, async interaction => {
     console.error('Interaction failed:', error);
     if (interaction.isRepliable()) await reply(interaction, 'Something went wrong. Check the bot console.').catch(console.error);
   }
+});
+
+let activitySaveTimer = null;
+function scheduleActivitySave() {
+  if (activitySaveTimer) return;
+  activitySaveTimer = setTimeout(() => {
+    activitySaveTimer = null;
+    try {
+      saveState();
+    } catch (error) {
+      console.error('Could not save member activity:', error);
+    }
+  }, 2_000);
+  activitySaveTimer.unref?.();
+}
+
+client.on(Events.MessageCreate, message => {
+  if (!message.inGuild() || message.guildId !== GUILD_ID || message.author.bot) return;
+  recordMemberActivity({
+    guildId: message.guildId,
+    userId: message.author.id,
+    channelId: message.channelId,
+    lastMessageAt: message.createdTimestamp,
+  });
+  scheduleActivitySave();
 });
 
 client.on(Events.GuildMemberAdd, member => {
@@ -1036,6 +1110,10 @@ client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
 });
 
 client.on(Events.GuildMemberRemove, member => {
+  if (member.guild.id === GUILD_ID && hasMemberRole(member)) {
+    void updateMemberCount(member.guild)
+      .catch(error => console.error(`Could not update the xd member count after ${member.id} left:`, error));
+  }
   const record = getJail(member.guild.id, member.id);
   if (!record) return;
   void restoreJailAccess(member.guild, member.id, record.snapshots)
@@ -1057,7 +1135,7 @@ client.once(Events.ClientReady, () => {
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 for (const guildCommand of [
   command, tryoutCommand, acceptCommand, jailCommand, unjailCommand, lockCommand, unlockCommand,
-  raidCommand, roleInCommand, pureCommand,
+  raidCommand, roleInCommand, pureCommand, activityCommand,
 ]) {
   await rest.post(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: guildCommand.toJSON() });
 }

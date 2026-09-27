@@ -21,6 +21,8 @@ test('older moderation data gains private notes without losing history', async (
     assert.equal(store.getJail('guild', 'user'), null);
     assert.equal(store.getChannelLock('guild', 'channel'), null);
     assert.equal(store.getActiveRaid('guild'), null);
+    assert.equal(store.getMemberActivity('guild', 'user'), null);
+    assert.ok(Number.isFinite(store.getState().activityTrackingStartedAt));
 
     store.addNote({ guildId: 'guild', targetId: 'user', authorId: 'mod', text: 'Private note' });
     store.setJail({ guildId: 'guild', targetId: 'user', moderatorId: 'mod', snapshots: [] });
@@ -33,6 +35,16 @@ test('older moderation data gains private notes without losing history', async (
     store.setActiveRaid({ guildId: 'guild', opps: 'Opponents', startedAt: 123 });
     assert.equal(store.getActiveRaid('guild').opps, 'Opponents');
     store.removeActiveRaid('guild');
+    store.recordMemberActivity({
+      guildId: 'guild', userId: 'user', channelId: 'channel', lastMessageAt: 123,
+    });
+    store.recordMemberActivity({
+      guildId: 'guild', userId: 'user', channelId: 'new-channel', lastMessageAt: 456,
+    });
+    assert.deepEqual(store.getMemberActivity('guild', 'user'), {
+      guildId: 'guild', userId: 'user', channelId: 'new-channel', lastMessageAt: 456,
+    });
+    store.saveState();
     assert.equal(store.getActiveRaid('guild'), null);
     assert.equal(store.getChannelLock('guild', 'channel'), null);
     assert.equal(store.getNotes('guild', 'user')[0].text, 'Private note');
@@ -42,6 +54,9 @@ test('older moderation data gains private notes without losing history', async (
     assert.deepEqual(saved.jails, []);
     assert.deepEqual(saved.channelLocks, []);
     assert.deepEqual(saved.activeRaids, []);
+    assert.deepEqual(saved.memberActivity, [{
+      guildId: 'guild', userId: 'user', channelId: 'new-channel', lastMessageAt: 456,
+    }]);
   } finally {
     process.chdir(originalDirectory);
     rmSync(testDirectory, { recursive: true, force: true });

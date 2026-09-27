@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  MEMBER_COUNT_CHANNEL_ID, MEMBER_COUNT_CHANNEL_PREFIX, MEMBER_ROLE_ID, updateMemberCount,
+  MEMBER_COUNT_CHANNEL_ID, MEMBER_COUNT_CHANNEL_PREFIX, MEMBER_ROLE_ID, hasMemberRole,
+  updateMemberCount,
 } from '../src/membercount.js';
 
 function setup({ currentName = '・xd count:', roleExists = true, channelExists = true } = {}) {
@@ -41,6 +42,11 @@ test('member count avoids an unnecessary rename when the name is current', async
     count: 2, name: '・xd count: 2', changed: false,
   });
   assert.equal(calls.length, 0);
+});
+
+test('member departures only need a count update when the member had the counted role', () => {
+  assert.equal(hasMemberRole({ roles: { cache: { has: id => id === MEMBER_ROLE_ID } } }), true);
+  assert.equal(hasMemberRole({ roles: { cache: { has: () => false } } }), false);
 });
 
 test('member count rejects a missing role or channel', async () => {
