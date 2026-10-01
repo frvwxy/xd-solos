@@ -25,7 +25,7 @@ export function killSwitchIndicatorMessage() {
   const card = new ContainerBuilder()
     .setAccentColor(0xed4245)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      '## 🚨 Kill Switch Activated\nThis channel is locked until the bot owner ends the lockdown.',
+      '## <:lol:1555070479302397984> Kill Switch Activated\nThis channel is locked until kole ends the lockdown.',
     ));
   return {
     flags: MessageFlags.IsComponentsV2,

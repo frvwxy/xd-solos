@@ -18,6 +18,9 @@ test('kill switch uses the configured help channel and public lockdown card', ()
   const message = killSwitchIndicatorMessage();
   assert.ok(message.flags & MessageFlags.IsComponentsV2);
   assert.equal(message.components.length, 1);
-  assert.match(JSON.stringify(message.components[0].toJSON()), /Kill Switch Activated/);
+  const card = JSON.stringify(message.components[0].toJSON());
+  assert.match(card, /Kill Switch Activated/);
+  assert.match(card, /<:lol:1555070479302397984>/);
+  assert.match(card, /until kole ends the lockdown/);
   assert.deepEqual(message.allowedMentions, { parse: [] });
 });
