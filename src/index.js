@@ -15,7 +15,7 @@ import { acceptCommand, canUseAccept, deliverAcceptance, grantAcceptanceRoles } 
 import { postAcceptanceLog } from './acceptlogs.js';
 import { hasMemberRole, updateMemberCount } from './membercount.js';
 import {
-  canManageChannelLock, channelLockIndicatorMessage, lockChannel, lockCommand,
+  canManageChannelLock, channelLockIndicatorMessage, currentSendMessagesOverwrite, lockChannel, lockCommand,
   removeChannelLockIndicator, unlockChannel, unlockCommand,
 } from './channel-lock.js';
 import {
@@ -27,14 +27,17 @@ import {
   canUseRaid, endedRaidAnnouncementMessage, getRobloxJoinInfo, raidAnnouncementMessage,
   raidCommand, raidEndMessage, resolveRobloxUser,
 } from './raid.js';
+import {
+  KILL_SWITCH_CHANNEL_ID, canUseKillSwitch, killSwitchCommand, killSwitchIndicatorMessage,
+} from './killswitch.js';
 import { canUseRoleIn, giveRoleToMembersWithRole, roleInCommand } from './rolein.js';
 import { canUsePure, pureCommand, purePublicMessage, serverMuteIfInVoice } from './pure.js';
 import { activityCard, activityCommand, activityStatus } from './activity.js';
 import { CARD_IDLE_MS, getPendingCard } from './sessions.js';
 import {
-  addHistory, addNote, getActiveRaid, getChannelLock, getHistory, getJail, getMemberActivity,
+  addHistory, addNote, getActiveRaid, getChannelLock, getHistory, getJail, getKillSwitch, getMemberActivity,
   getNotes, getState, loadState, recordMemberActivity, removeActiveRaid, removeChannelLock,
-  removeJail, saveState, setActiveRaid, setChannelLock, setJail,
+  removeJail, removeKillSwitch, saveState, setActiveRaid, setChannelLock, setJail, setKillSwitch,
 } from './store.js';
 
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
@@ -57,6 +60,7 @@ const pending = new Map();
 const activeUnjails = new Set();
 const activeRaidOperations = new Set();
 const activeRoleInOperations = new Set();
+const enforcingKillSwitches = new Set();
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers,
@@ -517,6 +521,9 @@ async function handleChannelLock(interaction, shouldLock) {
     return reply(interaction, `Locked <#${channel.id}> for the member role.`);
   }
 
+  if (channel.id === KILL_SWITCH_CHANNEL_ID && getKillSwitch(interaction.guildId)) {
+    return reply(interaction, 'The kill switch is active. Only /killswitch deactivate can unlock the help channel.');
+  }
   if (!existing) return reply(interaction, 'This channel does not have a saved bot lock.');
   if (existing.source === 'raid') return reply(interaction, 'This channel is locked by an active raid. Use /raid end to unlock it.');
   try {
@@ -542,6 +549,174 @@ async function fetchTextChannel(guild, channelId, label) {
     throw new Error(`${label} channel ${channelId} was not found or cannot receive messages.`);
   }
   return channel;
+}
+
+async function activateKillSwitch(interaction) {
+  if (getActiveRaid(interaction.guildId)) {
+    return reply(interaction, 'The kill switch cannot be activated while a raid is active. End the raid first.');
+  }
+  if (getKillSwitch(interaction.guildId)) return reply(interaction, 'The kill switch is already active.');
+
+  let channel;
+  try {
+    channel = await fetchTextChannel(interaction.guild, KILL_SWITCH_CHANNEL_ID, 'Help');
+  } catch (error) {
+    return reply(interaction, error.message);
+  }
+  const existing = getChannelLock(interaction.guildId, channel.id);
+  if (existing?.source === 'raid') {
+    return reply(interaction, 'The kill switch cannot be activated while the help channel has a raid lock.');
+  }
+
+  const bot = await interaction.guild.members.fetchMe();
+  let previous = existing?.previous;
+  let indicatorMessage;
+  try {
+    if (!existing || currentSendMessagesOverwrite(channel) !== false) {
+      const result = await lockChannel(channel, interaction.guild, bot);
+      if (!existing) previous = result.previous;
+    }
+    indicatorMessage = await channel.send(killSwitchIndicatorMessage());
+    const record = {
+      guildId: interaction.guildId,
+      channelId: channel.id,
+      previous,
+      indicatorMessageId: indicatorMessage.id,
+      activatedBy: interaction.user.id,
+      activatedAt: new Date().toISOString(),
+    };
+    setChannelLock({
+      guildId: interaction.guildId,
+      channelId: channel.id,
+      moderatorId: interaction.user.id,
+      previous,
+      indicatorMessageId: indicatorMessage.id,
+      source: 'killswitch',
+      at: record.activatedAt,
+    });
+    setKillSwitch(record);
+  } catch (error) {
+    await indicatorMessage?.delete().catch(console.error);
+    try { removeKillSwitch(interaction.guildId); } catch (saveError) { console.error(saveError); }
+    if (existing) {
+      try { setChannelLock(existing); } catch (saveError) { console.error(saveError); }
+    } else {
+      try { removeChannelLock(interaction.guildId, channel.id); } catch (saveError) { console.error(saveError); }
+      if (previous !== undefined) {
+        await unlockChannel(channel, interaction.guild, bot, previous).catch(console.error);
+      }
+    }
+    console.error('Could not activate the kill switch:', error);
+    return reply(interaction, `Could not activate the kill switch. ${error.message}`);
+  }
+
+  if (existing?.indicatorMessageId && existing.indicatorMessageId !== indicatorMessage.id) {
+    await removeChannelLockIndicator(channel, existing.indicatorMessageId)
+      .catch(error => console.error('Could not remove the previous channel-lock indicator:', error));
+  }
+  return reply(interaction, `Kill switch activated. <#${channel.id}> is locked and raid commands are disabled.`);
+}
+
+async function deactivateKillSwitch(interaction) {
+  const record = getKillSwitch(interaction.guildId);
+  if (!record) return reply(interaction, 'The kill switch is not active.');
+
+  const channel = await interaction.guild.channels.fetch(record.channelId).catch(() => null);
+  if (!channel?.isTextBased() || typeof channel.permissionOverwrites?.edit !== 'function') {
+    try {
+      if (getChannelLock(interaction.guildId, record.channelId)?.source === 'killswitch') {
+        removeChannelLock(interaction.guildId, record.channelId);
+      }
+      removeKillSwitch(interaction.guildId);
+    } catch (error) {
+      console.error('Could not clear the kill switch after its channel disappeared:', error);
+      return reply(interaction, `Could not clear the saved kill switch. ${error.message}`);
+    }
+    return reply(interaction, 'Kill switch deactivated. The saved help channel no longer exists, so no permission was restored.');
+  }
+
+  const bot = await interaction.guild.members.fetchMe();
+  try {
+    await unlockChannel(channel, interaction.guild, bot, record.previous);
+    if (getChannelLock(interaction.guildId, channel.id)?.source === 'killswitch') {
+      removeChannelLock(interaction.guildId, channel.id);
+    }
+    removeKillSwitch(interaction.guildId);
+  } catch (error) {
+    await lockChannel(channel, interaction.guild, bot).catch(console.error);
+    if (!getKillSwitch(interaction.guildId)) {
+      try { setKillSwitch(record); } catch (saveError) { console.error('Could not restore the saved kill-switch state:', saveError); }
+    }
+    if (!getChannelLock(interaction.guildId, channel.id)) {
+      try {
+        setChannelLock({
+          guildId: interaction.guildId,
+          channelId: channel.id,
+          moderatorId: record.activatedBy,
+          previous: record.previous,
+          indicatorMessageId: record.indicatorMessageId,
+          source: 'killswitch',
+          at: record.activatedAt,
+        });
+      } catch (saveError) {
+        console.error('Could not restore the saved kill-switch channel lock:', saveError);
+      }
+    }
+    console.error('Could not deactivate the kill switch:', error);
+    return reply(interaction, `Could not deactivate the kill switch. ${error.message}`);
+  }
+
+  let indicatorRemoved = true;
+  try {
+    await removeChannelLockIndicator(channel, record.indicatorMessageId);
+  } catch (error) {
+    indicatorRemoved = false;
+    console.error('Could not remove the kill-switch indicator:', error);
+  }
+  return reply(interaction, `Kill switch deactivated. <#${channel.id}> was restored and raid commands are available again.${indicatorRemoved ? '' : ' The lockdown indicator could not be removed.'}`);
+}
+
+async function handleKillSwitch(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (!canUseKillSwitch(interaction.user.id)) {
+    return reply(interaction, 'Only the configured bot owner can use the kill switch.');
+  }
+  if (activeRaidOperations.has(interaction.guildId)) {
+    return reply(interaction, 'Another raid or kill-switch action is already in progress.');
+  }
+  activeRaidOperations.add(interaction.guildId);
+  try {
+    return interaction.options.getSubcommand() === 'activate'
+      ? await activateKillSwitch(interaction)
+      : await deactivateKillSwitch(interaction);
+  } finally {
+    activeRaidOperations.delete(interaction.guildId);
+  }
+}
+
+async function enforceKillSwitchLock(guild, channel) {
+  const record = getKillSwitch(guild.id);
+  if (!record || record.channelId !== channel.id || currentSendMessagesOverwrite(channel) === false) return;
+  if (activeRaidOperations.has(guild.id) || enforcingKillSwitches.has(guild.id)) return;
+  enforcingKillSwitches.add(guild.id);
+  try {
+    const bot = await guild.members.fetchMe();
+    await lockChannel(channel, guild, bot);
+  } finally {
+    enforcingKillSwitches.delete(guild.id);
+  }
+}
+
+async function reconcileKillSwitches() {
+  for (const record of [...getState().killSwitches]) {
+    try {
+      const guild = await client.guilds.fetch(record.guildId);
+      const channel = await guild.channels.fetch(record.channelId);
+      await enforceKillSwitchLock(guild, channel);
+    } catch (error) {
+      console.error(`Could not reapply kill-switch lock for ${record.guildId}/${record.channelId}:`, error);
+    }
+  }
 }
 
 async function startRaid(interaction, actor) {
@@ -685,6 +860,9 @@ async function handleRaid(interaction) {
   if (activeRaidOperations.has(interaction.guildId)) return reply(interaction, 'Another raid action is already in progress.');
   activeRaidOperations.add(interaction.guildId);
   try {
+    if (getKillSwitch(interaction.guildId)) {
+      return reply(interaction, 'Raid commands are disabled while the kill switch is active.');
+    }
     return interaction.options.getSubcommand() === 'start'
       ? await startRaid(interaction, actor)
       : await endRaid(interaction, actor);
@@ -1042,6 +1220,7 @@ client.on(Events.InteractionCreate, async interaction => {
     else if (interaction.isChatInputCommand() && interaction.commandName === 'lock') await handleChannelLock(interaction, true);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'unlock') await handleChannelLock(interaction, false);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'raid') await handleRaid(interaction);
+    else if (interaction.isChatInputCommand() && interaction.commandName === 'killswitch') await handleKillSwitch(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'rolein') await handleRoleIn(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'pure') await handlePure(interaction);
     else if (interaction.isChatInputCommand() && interaction.commandName === 'activity') await handleActivity(interaction);
@@ -1090,6 +1269,12 @@ client.on(Events.ChannelCreate, channel => {
     .catch(error => console.error(`Could not apply jail permissions to new channel ${channel.id}:`, error));
 });
 
+client.on(Events.ChannelUpdate, (oldChannel, newChannel) => {
+  if (newChannel.guildId !== GUILD_ID || newChannel.id !== KILL_SWITCH_CHANNEL_ID) return;
+  void enforceKillSwitchLock(newChannel.guild, newChannel)
+    .catch(error => console.error(`Could not enforce the kill-switch lock in ${newChannel.id}:`, error));
+});
+
 client.on(Events.ChannelDelete, channel => {
   if (channel.guildId === GUILD_ID && getChannelLock(channel.guildId, channel.id)) {
     try {
@@ -1130,6 +1315,7 @@ client.once(Events.ClientReady, () => {
   console.log(`Ready as ${client.user.tag}`);
   void checkTimedBans();
   void reconcileJails();
+  void reconcileKillSwitches();
   setInterval(() => void checkTimedBans(), 30_000);
   setInterval(() => {
     for (const [nonce, item] of pending) if (item.expiresAt < Date.now()) pending.delete(nonce);
@@ -1140,7 +1326,7 @@ client.once(Events.ClientReady, () => {
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 for (const guildCommand of [
   command, tryoutCommand, acceptCommand, jailCommand, unjailCommand, lockCommand, unlockCommand,
-  raidCommand, roleInCommand, pureCommand, activityCommand,
+  raidCommand, killSwitchCommand, roleInCommand, pureCommand, activityCommand,
 ]) {
   await rest.post(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: guildCommand.toJSON() });
 }

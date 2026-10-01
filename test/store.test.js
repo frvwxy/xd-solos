@@ -21,6 +21,7 @@ test('older moderation data gains private notes without losing history', async (
     assert.equal(store.getJail('guild', 'user'), null);
     assert.equal(store.getChannelLock('guild', 'channel'), null);
     assert.equal(store.getActiveRaid('guild'), null);
+    assert.equal(store.getKillSwitch('guild'), null);
     assert.equal(store.getMemberActivity('guild', 'user'), null);
     assert.ok(Number.isFinite(store.getState().activityTrackingStartedAt));
 
@@ -35,6 +36,9 @@ test('older moderation data gains private notes without losing history', async (
     store.setActiveRaid({ guildId: 'guild', opps: 'Opponents', startedAt: 123 });
     assert.equal(store.getActiveRaid('guild').opps, 'Opponents');
     store.removeActiveRaid('guild');
+    store.setKillSwitch({ guildId: 'guild', channelId: 'help', previous: null });
+    assert.equal(store.getKillSwitch('guild').channelId, 'help');
+    store.removeKillSwitch('guild');
     store.recordMemberActivity({
       guildId: 'guild', userId: 'user', channelId: 'channel', lastMessageAt: 123,
     });
@@ -54,6 +58,7 @@ test('older moderation data gains private notes without losing history', async (
     assert.deepEqual(saved.jails, []);
     assert.deepEqual(saved.channelLocks, []);
     assert.deepEqual(saved.activeRaids, []);
+    assert.deepEqual(saved.killSwitches, []);
     assert.deepEqual(saved.memberActivity, [{
       guildId: 'guild', userId: 'user', channelId: 'new-channel', lastMessageAt: 456,
     }]);

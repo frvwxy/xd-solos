@@ -23,6 +23,8 @@ export function loadState() {
     if (!Array.isArray(state.channelLocks)) throw new Error('Invalid channel lock records');
     if (state.activeRaids === undefined) state.activeRaids = [];
     if (!Array.isArray(state.activeRaids)) throw new Error('Invalid active raid records');
+    if (state.killSwitches === undefined) state.killSwitches = [];
+    if (!Array.isArray(state.killSwitches)) throw new Error('Invalid kill switch records');
     if (state.memberActivity === undefined) state.memberActivity = [];
     if (!Array.isArray(state.memberActivity)) throw new Error('Invalid member activity records');
     if (!Number.isFinite(state.activityTrackingStartedAt)) state.activityTrackingStartedAt = Date.now();
@@ -30,7 +32,7 @@ export function loadState() {
     if (error.code !== 'ENOENT') throw error;
     state = {
       warnings: [], timedBans: [], history: [], notes: [], jails: [], channelLocks: [],
-      activeRaids: [], memberActivity: [], activityTrackingStartedAt: Date.now(),
+      activeRaids: [], killSwitches: [], memberActivity: [], activityTrackingStartedAt: Date.now(),
     };
   }
   return state;
@@ -124,6 +126,24 @@ export function removeActiveRaid(guildId) {
   const before = state.activeRaids.length;
   state.activeRaids = state.activeRaids.filter(entry => entry.guildId !== guildId);
   if (state.activeRaids.length !== before) saveState();
+}
+
+export function getKillSwitch(guildId) {
+  return getState().killSwitches.find(entry => entry.guildId === guildId) ?? null;
+}
+
+export function setKillSwitch(entry) {
+  const state = getState();
+  state.killSwitches = state.killSwitches.filter(item => item.guildId !== entry.guildId);
+  state.killSwitches.push(entry);
+  saveState();
+}
+
+export function removeKillSwitch(guildId) {
+  const state = getState();
+  const before = state.killSwitches.length;
+  state.killSwitches = state.killSwitches.filter(entry => entry.guildId !== guildId);
+  if (state.killSwitches.length !== before) saveState();
 }
 
 export function getMemberActivity(guildId, userId) {
