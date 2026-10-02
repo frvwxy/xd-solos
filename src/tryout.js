@@ -4,7 +4,7 @@ import {
 import { addDivider, cardMessage, cardWithHeader } from './cards.js';
 import { accessLevel } from './policy.js';
 
-export const TRYOUT_SERVER_URL = 'https://www.roblox.com/share?code=9bcd5321f7579243bd813e8f275554d4&type=Server';
+export const TRYOUT_SERVER_URL = 'https://www.roblox.com/share?code=d47815abe180f7409eb1b68977ecc0a3&type=Server';
 export const ADDITIONAL_TRYOUT_ROLE_ID = '1551403954745905222';
 
 export function canUseTryout(roleIds, userId = null) {

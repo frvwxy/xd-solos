@@ -16,6 +16,8 @@ test('/tryout requires a user option', () => {
   assert.equal(command.name, 'tryout');
   assert.equal(command.options[0].name, 'user');
   assert.equal(command.options[0].required, true);
+  assert.equal(TRYOUT_SERVER_URL,
+    'https://www.roblox.com/share?code=d47815abe180f7409eb1b68977ecc0a3&type=Server');
 });
 
 test('/tryout allows existing moderation roles and the additional staff role without granting /user access', () => {
